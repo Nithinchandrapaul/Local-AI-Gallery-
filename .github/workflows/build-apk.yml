@@ -10,6 +10,7 @@ permissions:
 
 env:
   GRADLE_VERSION: "8.13"
+  EMBEDDING_MODEL_URL: "https://huggingface.co/litert-community/embeddinggemma-2-text-vision-440m-litert-lm/resolve/main/embeddinggemma-2-text-vision-440m.litertlm"
 
 jobs:
   build:
@@ -35,6 +36,13 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Prepare bundled EmbeddingGemma 2 model
+        run: |
+          mkdir -p app/src/main/assets/models
+          curl -L --fail --retry 5 --retry-delay 5 --retry-all-errors "$EMBEDDING_MODEL_URL" -o app/src/main/assets/models/embeddinggemma-2-text-vision-440m.litertlm
+          test -s app/src/main/assets/models/embeddinggemma-2-text-vision-440m.litertlm
+          ls -lh app/src/main/assets/models/embeddinggemma-2-text-vision-440m.litertlm
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -42,6 +50,12 @@ jobs:
 
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Verify bundled model is inside APK
+        run: |
+          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          unzip -l "$APK" | grep 'assets/models/embeddinggemma-2-text-vision-440m.litertlm'
+          ls -lh "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
