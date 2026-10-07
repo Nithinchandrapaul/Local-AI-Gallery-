@@ -8,9 +8,10 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   GRADLE_VERSION: "8.13"
@@ -98,3 +99,14 @@ jobs:
           path: app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 14
+
+      - name: Rename and publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/bundle/release/*.aab
+          generate_release_notes: true
+
