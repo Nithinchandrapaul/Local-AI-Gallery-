@@ -312,7 +312,9 @@ private fun CleanupScreen(
         (it.recommendedDeleteIds.mapNotNull { id -> items.firstOrNull { item -> item.id == id } } +
          it.screenshots +
          it.largeFiles +
-         it.likelyForwarded).distinctBy { x -> x.id }
+         it.likelyForwarded +
+         it.blurry +
+         it.lowResolution).distinctBy { x -> x.id }
     } ?: emptyList()
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -331,6 +333,8 @@ private fun CleanupScreen(
             Text("WhatsApp: ${it.whatsapp.size}")
             Text("Likely forwarded: ${it.likelyForwarded.size}")
             Text("Large files >10 MB: ${it.largeFiles.size}")
+            Text("Blurry photos: ${it.blurry.size}")
+            Text("Low-resolution photos: ${it.lowResolution.size}")
             Text("Recoverable duplicate space: ${"%.1f".format(it.totalRecoverableBytes / 1024.0 / 1024.0)} MB")
         }
     }
