@@ -81,10 +81,86 @@ class MediaStoreRepository(private val context: Context) {
                     isWhatsAppSent = sent,
                     isWhatsAppReceived = received,
                     isLikelyForwarded = likelyForwarded,
-                    whatsAppForwardConfidence = forwardConfidence
+                    whatsAppForwardConfidence = forwardConfidence,
+                    isVideo = false,
+                    durationMs = 0L
                 )
             }
         }
         return result
+    }
+
+    fun scanVideos(): List<MediaItem> {
+        val result = mutableListOf<MediaItem>()
+        val projection = arrayOf(
+            MediaStore.Video.Media._ID,
+            MediaStore.Video.Media.DISPLAY_NAME,
+            MediaStore.Video.Media.RELATIVE_PATH,
+            MediaStore.Video.Media.SIZE,
+            MediaStore.Video.Media.DATE_ADDED,
+            MediaStore.Video.Media.WIDTH,
+            MediaStore.Video.Media.HEIGHT,
+            MediaStore.Video.Media.MIME_TYPE,
+            MediaStore.Video.Media.DURATION
+        )
+        val selection = "${MediaStore.Video.Media.SIZE} > 0"
+        val sort = "${MediaStore.Video.Media.DATE_ADDED} DESC"
+        context.contentResolver.query(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            projection,
+            selection,
+            null,
+            sort
+        )?.use { c ->
+            val id = c.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+            val name = c.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
+            val path = c.getColumnIndexOrThrow(MediaStore.Video.Media.RELATIVE_PATH)
+            val size = c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
+            val date = c.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
+            val width = c.getColumnIndexOrThrow(MediaStore.Video.Media.WIDTH)
+            val height = c.getColumnIndexOrThrow(MediaStore.Video.Media.HEIGHT)
+            val mime = c.getColumnIndexOrThrow(MediaStore.Video.Media.MIME_TYPE)
+            val duration = c.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
+            while (c.moveToNext()) {
+                val n = c.getString(name) ?: ""
+                val p = c.getString(path) ?: ""
+                val lower = "$n $p".lowercase()
+                val wa = lower.contains("whatsapp") || lower.contains("com.whatsapp")
+                val sent = wa && (
+                    lower.contains("/sent") || lower.contains("\\sent") ||
+                    lower.contains("whatsapp video/sent") || lower.contains("sent/")
+                )
+                val received = wa && !sent
+
+                val dur = c.getLong(duration)
+
+                result += MediaItem(
+                    id = c.getLong(id),
+                    uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, c.getLong(id)),
+                    name = n,
+                    path = p,
+                    size = c.getLong(size),
+                    dateAdded = c.getLong(date),
+                    width = c.getInt(width),
+                    height = c.getInt(height),
+                    mimeType = c.getString(mime) ?: "video/*",
+                    isScreenshot = false,
+                    isWhatsApp = wa,
+                    isWhatsAppSent = sent,
+                    isWhatsAppReceived = received,
+                    isLikelyForwarded = wa && !sent && (n.startsWith("VID-") || lower.contains("whatsapp")),
+                    whatsAppForwardConfidence = if (wa && !sent) 70 else 0,
+                    isVideo = true,
+                    durationMs = dur
+                )
+            }
+        }
+        return result
+    }
+
+    fun scanAll(): List<MediaItem> {
+        val images = scanImages()
+        val videos = scanVideos()
+        return (images + videos).sortedByDescending { it.dateAdded }
     }
 }

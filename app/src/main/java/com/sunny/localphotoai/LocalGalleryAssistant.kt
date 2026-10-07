@@ -20,13 +20,30 @@ object LocalGalleryAssistant {
                 AssistantOutcome(AssistantResult(
                     "Hello! I am your 100% on-device AI gallery assistant. You can ask me to:\n" +
                     "• Find specific photos ('receipts', 'family trip', 'car photos')\n" +
+                    "• Filter and inspect videos ('show videos', 'large videos >50MB')\n" +
                     "• Inspect recoverable storage ('how much space can I recover?')\n" +
                     "• Detect exact duplicates and review deletion candidates\n" +
-                    "• Analyze WhatsApp clutter and forwarded images\n" +
+                    "• Analyze WhatsApp clutter, videos, and forwarded images\n" +
                     "• Identify blurry or low-quality photos\n" +
                     "• Show all screenshots or large files (>10MB)",
                     "Capabilities overview"
                 ))
+            }
+            lower.contains("large video") || (lower.contains("video") && (lower.contains("large") || lower.contains("big") || lower.contains("50mb") || lower.contains("size"))) -> {
+                val largeVids = items.filter { it.isLargeVideo }
+                val totalMb = largeVids.sumOf { it.size } / 1024.0 / 1024.0
+                AssistantOutcome(
+                    AssistantResult("Found ${largeVids.size} large videos occupying %.1f MB total (>50MB each).".format(totalMb), "Inspect large videos"),
+                    largeVids
+                )
+            }
+            lower.contains("video") -> {
+                val vids = items.filter { it.isVideo }
+                val totalMb = vids.sumOf { it.size } / 1024.0 / 1024.0
+                AssistantOutcome(
+                    AssistantResult("Found ${vids.size} videos in your gallery occupying %.1f MB total.".format(totalMb), "Filter videos"),
+                    vids
+                )
             }
             lower.contains("screenshot") -> {
                 val shots = items.filter { it.isScreenshot }
@@ -39,7 +56,7 @@ object LocalGalleryAssistant {
                 val largeFiles = items.filter { it.size > 10 * 1024 * 1024 }
                 val totalMb = largeFiles.sumOf { it.size } / 1024.0 / 1024.0
                 AssistantOutcome(
-                    AssistantResult("Found ${largeFiles.size} large photos occupying %.1f MB total (>10MB each).".format(totalMb), "Inspect large photos"),
+                    AssistantResult("Found ${largeFiles.size} large photos & media occupying %.1f MB total (>10MB each).".format(totalMb), "Inspect large media"),
                     largeFiles
                 )
             }

@@ -43,11 +43,24 @@ fun LocalPhotoAIApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showWelcome by remember { mutableStateOf(true) }
-    var permission by remember {
-        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED)
+    val permissionsToRequest = remember {
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
     }
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        permission = it
+    var permission by remember {
+        mutableStateOf(
+            permissionsToRequest.all {
+                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+            }
+        )
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        permission = results.values.any { it }
     }
 
     var items by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -65,8 +78,10 @@ fun LocalPhotoAIApp() {
 
     LaunchedEffect(permission) {
         if (permission) {
-            items = MediaStoreRepository(context).scanImages()
-            status = "${items.size} photos found"
+            items = MediaStoreRepository(context).scanAll()
+            val photosCount = items.count { !it.isVideo }
+            val videosCount = items.count { it.isVideo }
+            status = "$photosCount photos, $videosCount videos found"
         }
     }
 
@@ -84,11 +99,12 @@ fun LocalPhotoAIApp() {
                                 val ok = embedder.initialize()
                                 if (!ok) status = "On-device AI could not be loaded: ${embedder.lastError ?: "model unavailable"}"
                                 else {
-                                    val currentIds = items.map { it.id }.toSet()
+                                    val photos = items.filter { !it.isVideo }
+                                    val currentIds = photos.map { it.id }.toSet()
                                     index.removeMissing(currentIds)
                                     var updated = 0
                                     var unchanged = 0
-                                    items.forEachIndexed { i, item ->
+                                    photos.forEachIndexed { i, item ->
                                         if (index.isCurrent(item)) {
                                             unchanged++
                                         } else {
@@ -98,8 +114,8 @@ fun LocalPhotoAIApp() {
                                                 updated++
                                             }
                                         }
-                                        if (i % 10 == 0 || i == items.lastIndex) {
-                                            status = "Indexed ${i + 1}/${items.size} • $updated updated • $unchanged unchanged"
+                                        if (i % 10 == 0 || i == photos.lastIndex) {
+                                            status = "Indexed ${i + 1}/${photos.size} • $updated updated • $unchanged unchanged"
                                         }
                                     }
                                     status = "AI index ready: ${index.count()} photos • $updated updated"
@@ -120,10 +136,15 @@ fun LocalPhotoAIApp() {
         ) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
                 if (!permission) {
-                    PermissionCard { permissionLauncher.launch(Manifest.permission.READ_MEDIA_IMAGES) }
+                    PermissionCard { permissionLauncher.launch(permissionsToRequest) }
                 } else if (tab == 0) {
                     SearchScreen(
-                        query, { query = it }, results, status, busy,
+                        items = items,
+                        query = query,
+                        onQuery = { query = it },
+                        results = results,
+                        status = status,
+                        busy = busy,
                         onSearch = {
                             scope.launch {
                                 busy = true
@@ -138,8 +159,10 @@ fun LocalPhotoAIApp() {
                             }
                         },
                         onRescan = {
-                            items = MediaStoreRepository(context).scanImages()
-                            status = "${items.size} photos found"
+                            items = MediaStoreRepository(context).scanAll()
+                            val photosCount = items.count { !it.isVideo }
+                            val videosCount = items.count { it.isVideo }
+                            status = "$photosCount photos, $videosCount videos found"
                         }
                     )
                 } else if (tab == 1) {
@@ -255,6 +278,7 @@ private fun PermissionCard(onGrant: () -> Unit) {
 
 @Composable
 private fun SearchScreen(
+    items: List<MediaItem>,
     query: String,
     onQuery: (String) -> Unit,
     results: List<MediaItem>,
@@ -263,13 +287,26 @@ private fun SearchScreen(
     onSearch: () -> Unit,
     onRescan: () -> Unit
 ) {
+    var mediaFilter by remember { mutableStateOf("All") }
+    val photosCount = remember(items) { items.count { !it.isVideo } }
+    val videosCount = remember(items) { items.count { it.isVideo } }
+
+    val displayedItems = remember(items, results, query, mediaFilter) {
+        val base = if (results.isNotEmpty() || query.isNotBlank()) results else items
+        when (mediaFilter) {
+            "Photos" -> base.filter { !it.isVideo }
+            "Videos" -> base.filter { it.isVideo }
+            else -> base
+        }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(
             value = query,
             onValueChange = onQuery,
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Search photos") },
-            placeholder = { Text("e.g. receipts, my car, screenshots of payments") },
+            label = { Text("Search photos & media") },
+            placeholder = { Text("e.g. receipts, my car, videos, WhatsApp") },
             singleLine = true
         )
         val suggestions = listOf(
@@ -307,12 +344,32 @@ private fun SearchScreen(
                 )
             }
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = mediaFilter == "All",
+                onClick = { mediaFilter = "All" },
+                label = { Text("All (${items.size})") }
+            )
+            FilterChip(
+                selected = mediaFilter == "Photos",
+                onClick = { mediaFilter = "Photos" },
+                label = { Text("Photos ($photosCount)") }
+            )
+            FilterChip(
+                selected = mediaFilter == "Videos",
+                onClick = { mediaFilter = "Videos" },
+                label = { Text("Videos ($videosCount)") }
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(enabled = query.isNotBlank() && !busy, onClick = onSearch) { Text("Search") }
             OutlinedButton(enabled = !busy, onClick = onRescan) { Text("Rescan") }
         }
         Text(status, style = MaterialTheme.typography.bodySmall)
-        PhotoGrid(results)
+        PhotoGrid(displayedItems)
     }
 }
 
@@ -337,6 +394,7 @@ private fun CleanupScreen(
             "Duplicates" -> report.recommendedDeleteIds.mapNotNull { id -> items.firstOrNull { it.id == id } }
             "Low Quality" -> report.qualityReport.lowQualityPhotos
             "Burst Shots" -> report.qualityReport.burstGroups.flatten().distinctBy { it.id }
+            "Large Videos" -> report.largeVideos
             "Blurry" -> report.blurry
             "Screenshots" -> report.screenshots
             else -> {
@@ -344,6 +402,7 @@ private fun CleanupScreen(
                  report.whatsAppReport.likelyForwarded +
                  report.whatsAppReport.sentMedia +
                  report.qualityReport.lowQualityPhotos +
+                 report.largeVideos +
                  report.screenshots).distinctBy { x -> x.id }
             }
         }
@@ -452,6 +511,32 @@ private fun CleanupScreen(
                 }
             }
 
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "Video Clutter Intelligence",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        "Total: ${report.videoReport.totalVideos} videos • ${"%.1f".format(report.videoReport.totalVideoBytes / 1024.0 / 1024.0)} MB (Large >50MB: ${report.largeVideos.size}, WhatsApp: ${report.videoReport.whatsAppVideos.size})",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedCategory == "Large Videos",
+                            onClick = { selectedCategory = "Large Videos" },
+                            label = { Text("Large Videos >50MB (${report.largeVideos.size})") }
+                        )
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -475,6 +560,7 @@ private fun CleanupScreen(
                 "Low Quality" -> "Photos with quality score < 45 (severe blur, poor exposure, or heavy compression artifacts)."
                 "Burst Shots" -> "Sequences of photos taken within seconds of each other. The highest quality photo is preserved."
                 "Duplicates" -> "Exact duplicate photos verified via SHA-256. Best quality photo is preserved."
+                "Large Videos" -> "Large videos exceeding 50 MB. Video files often occupy the most device storage."
                 "Blurry" -> "Photos with low sharpness (Laplacian variance < 80)."
                 "Screenshots" -> "Screen captures detected in screenshots directory."
                 else -> "All identified cleanup candidates. Review carefully before deleting."
@@ -574,6 +660,19 @@ private fun SelectablePhotoGrid(
                         )
                     }
                 }
+                if (item.isVideo) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                        shape = MaterialTheme.shapes.extraSmall,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp)
+                    ) {
+                        Text(
+                            text = "▶ ${item.durationFormatted.ifEmpty { "Video" }}",
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -594,12 +693,31 @@ private fun PhotoGrid(items: List<MediaItem>) {
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         items(items, key = { it.id }) { item ->
-            AsyncImage(
-                model = item.uri,
-                contentDescription = item.name,
-                modifier = Modifier.aspectRatio(1f).fillMaxWidth(),
-                contentScale = ContentScale.Crop
-            )
+            Box(
+                modifier = Modifier
+                    .aspectRatio(1f)
+                    .fillMaxWidth()
+            ) {
+                AsyncImage(
+                    model = item.uri,
+                    contentDescription = item.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                if (item.isVideo) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                        shape = MaterialTheme.shapes.extraSmall,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp)
+                    ) {
+                        Text(
+                            text = "▶ ${item.durationFormatted.ifEmpty { "Video" }}",
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }

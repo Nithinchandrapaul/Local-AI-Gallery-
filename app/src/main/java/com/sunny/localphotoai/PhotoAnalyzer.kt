@@ -26,6 +26,13 @@ data class QualityReport(
     val burstGroups: List<List<MediaItem>>
 )
 
+data class VideoReport(
+    val totalVideos: Int,
+    val totalVideoBytes: Long,
+    val largeVideos: List<MediaItem>,
+    val whatsAppVideos: List<MediaItem>
+)
+
 data class CleanupReport(
     val exactDuplicates: List<List<MediaItem>>,
     val visualGroups: List<List<MediaItem>>,
@@ -34,8 +41,10 @@ data class CleanupReport(
     val whatsapp: List<MediaItem>,
     val whatsAppReport: WhatsAppReport,
     val qualityReport: QualityReport,
+    val videoReport: VideoReport,
     val likelyForwarded: List<MediaItem>,
     val largeFiles: List<MediaItem>,
+    val largeVideos: List<MediaItem>,
     val blurry: List<MediaItem>,
     val lowResolution: List<MediaItem>,
     val keeperIds: Set<Long>,
@@ -49,17 +58,25 @@ class PhotoAnalyzer(context: Context) {
     suspend fun analyze(items: List<MediaItem>, largeMb: Double = 10.0): CleanupReport =
         withContext(Dispatchers.Default) {
             val enriched = items.map { item ->
-                val qual = cleanup.evaluateQuality(item.uri, item.width, item.height, item.size)
-                item.copy(
-                    sha256 = cleanup.sha256(item.uri),
-                    dHash = cleanup.dHash(item.uri),
-                    qualityScore = qual.score,
-                    isBlurry = qual.isBlurry,
-                    isBadExposure = qual.isBadExposure,
-                    isHeavilyCompressed = qual.isHeavilyCompressed,
-                    isLowResolution = qual.isLowResolution,
-                    qualityReason = qual.reason
-                )
+                if (item.isVideo) {
+                    item.copy(
+                        sha256 = cleanup.sha256(item.uri),
+                        qualityScore = 70,
+                        qualityReason = "Video (${item.durationFormatted})"
+                    )
+                } else {
+                    val qual = cleanup.evaluateQuality(item.uri, item.width, item.height, item.size)
+                    item.copy(
+                        sha256 = cleanup.sha256(item.uri),
+                        dHash = cleanup.dHash(item.uri),
+                        qualityScore = qual.score,
+                        isBlurry = qual.isBlurry,
+                        isBadExposure = qual.isBadExposure,
+                        isHeavilyCompressed = qual.isHeavilyCompressed,
+                        isLowResolution = qual.isLowResolution,
+                        qualityReason = qual.reason
+                    )
+                }
             }
 
             val exact = enriched.groupBy { it.sha256 }
@@ -153,6 +170,16 @@ class PhotoAnalyzer(context: Context) {
                 burstGroups = burstGroups
             )
 
+            val videos = enriched.filter { it.isVideo }
+            val largeVideos = videos.filter { it.size >= (50 * 1024 * 1024).toLong() }
+            val waVideos = videos.filter { it.isWhatsApp }
+            val videoReport = VideoReport(
+                totalVideos = videos.size,
+                totalVideoBytes = videos.sumOf { it.size },
+                largeVideos = largeVideos,
+                whatsAppVideos = waVideos
+            )
+
             CleanupReport(
                 exactDuplicates = exact,
                 visualGroups = visual,
@@ -161,8 +188,10 @@ class PhotoAnalyzer(context: Context) {
                 whatsapp = waItems,
                 whatsAppReport = whatsAppReport,
                 qualityReport = qualityReport,
+                videoReport = videoReport,
                 likelyForwarded = waLikelyForwarded,
                 largeFiles = enriched.filter { it.size >= (largeMb * 1024 * 1024).toLong() },
+                largeVideos = largeVideos,
                 blurry = enriched.filter { it.isBlurry },
                 lowResolution = enriched.filter { it.isLowResolution },
                 keeperIds = keeperIds,

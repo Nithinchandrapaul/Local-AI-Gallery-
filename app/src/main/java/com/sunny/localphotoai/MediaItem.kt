@@ -25,7 +25,24 @@ data class MediaItem(
     val qualityScore: Int = 50,
     val isHeavilyCompressed: Boolean = false,
     val isBadExposure: Boolean = false,
-    val qualityReason: String? = null
+    val qualityReason: String? = null,
+    val isVideo: Boolean = false,
+    val durationMs: Long = 0L
 ) {
     val sizeMb: Double get() = size / 1024.0 / 1024.0
+    val isLargeVideo: Boolean get() = isVideo && size > 50 * 1024 * 1024
+
+    val durationFormatted: String
+        get() {
+            if (!isVideo || durationMs <= 0) return ""
+            val totalSec = durationMs / 1000
+            val sec = totalSec % 60
+            val min = (totalSec / 60) % 60
+            val hrs = totalSec / 3600
+            return if (hrs > 0) {
+                "%d:%02d:%02d".format(hrs, min, sec)
+            } else {
+                "%02d:%02d".format(min, sec)
+            }
+        }
 }
