@@ -82,7 +82,7 @@ fun LocalPhotoAIApp() {
                                 busy = true
                                 status = "Loading on-device AI..."
                                 val ok = embedder.initialize()
-                                if (!ok) status = "On-device AI could not be loaded. The bundled model is unavailable."
+                                if (!ok) status = "On-device AI could not be loaded: ${embedder.lastError ?: "model unavailable"}"
                                 else {
                                     val currentIds = items.map { it.id }.toSet()
                                     index.removeMissing(currentIds)
@@ -128,7 +128,7 @@ fun LocalPhotoAIApp() {
                                 busy = true
                                 status = "Searching..."
                                 if (!embedder.initialize()) {
-                                    status = "AI model unavailable"
+                                    status = "AI model unavailable: ${embedder.lastError ?: ""}"
                                 } else {
                                     results = index.search(embedder.embedText(query) ?: FloatArray(0), items).map { it.item }
                                     status = "${results.size} semantic matches"

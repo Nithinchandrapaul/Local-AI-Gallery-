@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.ParcelFileDescriptor
+import android.util.Log
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.retrieval.universalembedder.UniversalEmbedder
@@ -15,21 +17,49 @@ import kotlin.math.sqrt
 class EmbeddingEngine(private val context: Context) {
     companion object {
         const val STORAGE_DIMENSION = 256
+        const val MODEL_ASSET_PATH = "models/embeddinggemma-2-text-vision-440m.litertlm"
     }
 
     private var embedder: UniversalEmbedder? = null
+    var lastError: String? = null
+        private set
 
     suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
         if (embedder != null) return@withContext true
-        runCatching {
-            val model = ModelDownloader.modelFile(context)
+        lastError = null
+
+        // 1. Primary path: Direct zero-copy loading from APK assets
+        try {
             val options = UniversalEmbedderOptions.builder()
-                .setBaseOptions(BaseOptions.builder().setModelAssetPath(model.absolutePath).build())
+                .setBaseOptions(BaseOptions.builder().setModelAssetPath(MODEL_ASSET_PATH).build())
                 .setL2Normalize(true)
                 .build()
             embedder = UniversalEmbedder.createFromOptions(context, options)
-            true
-        }.getOrDefault(false)
+            Log.i("EmbeddingEngine", "Model loaded successfully from asset path: $MODEL_ASSET_PATH")
+            return@withContext true
+        } catch (e: Throwable) {
+            Log.w("EmbeddingEngine", "Direct asset load failed: ${e.message}, trying FileDescriptor fallback...", e)
+            lastError = e.message ?: e.javaClass.simpleName
+        }
+
+        // 2. Fallback path: Load via extracted internal file descriptor
+        try {
+            val file = ModelDownloader.modelFile(context)
+            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                val options = UniversalEmbedderOptions.builder()
+                    .setBaseOptions(BaseOptions.builder().setModelAssetFileDescriptor(pfd.fd).build())
+                    .setL2Normalize(true)
+                    .build()
+                embedder = UniversalEmbedder.createFromOptions(context, options)
+                Log.i("EmbeddingEngine", "Model loaded successfully from extracted file descriptor: ${file.absolutePath}")
+                lastError = null
+                return@withContext true
+            }
+        } catch (e2: Throwable) {
+            Log.e("EmbeddingEngine", "Fallback file descriptor load failed: ${e2.message}", e2)
+            lastError = "Asset error: ${lastError ?: "unknown"} | File error: ${e2.message ?: e2.javaClass.simpleName}"
+            false
+        }
     }
 
     suspend fun embedText(text: String): FloatArray? = withContext(Dispatchers.Default) {

@@ -12,19 +12,22 @@ android {
         applicationId = "com.sunny.localphotoai"
         minSdk = 31
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.5.0"
+        versionCode = 8
+        versionName = "1.5.1"
     }
 
     buildFeatures {
         compose = true
     }
 
+    androidResources {
+        noCompress += "litertlm"
+    }
+
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         resources.excludes += "/META-INF/{LGPL2.1,AL2.0}"
     }
-
 }
 
 kotlin {
