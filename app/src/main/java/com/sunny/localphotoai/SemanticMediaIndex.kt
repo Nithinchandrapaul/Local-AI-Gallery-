@@ -32,9 +32,7 @@ class SemanticMediaIndex(context: Context) {
                 "SELECT size, date_added FROM vectors WHERE id=?",
                 arrayOf(item.id.toString())
             ).use { c ->
-                c.moveToFirst() &&
-                    c.getLong(0) == item.size &&
-                    c.getLong(1) == item.dateAdded
+                c.moveToFirst() && c.getLong(0) == item.size && c.getLong(1) == item.dateAdded
             }
         }
     }
@@ -48,36 +46,30 @@ class SemanticMediaIndex(context: Context) {
                     val id = c.getLong(0)
                     if (id !in currentIds) stale += id
                 }
-                stale.forEach { id ->
-                    database.delete("vectors", "id=?", arrayOf(id.toString()))
-                }
+                stale.forEach { id -> database.delete("vectors", "id=?", arrayOf(id.toString())) }
             }
         }
     }
 
-    suspend fun search(
-        query: FloatArray,
-        allItems: List<MediaItem>,
-        limit: Int = 100
-    ): List<SemanticHit> = withContext(Dispatchers.IO) {
-        val map = allItems.associateBy { it.id }
-        val hits = mutableListOf<SemanticHit>()
-        synchronized(lock) {
-            db.readableDatabase.rawQuery("SELECT id, embedding FROM vectors", null).use { c ->
-                val idCol = c.getColumnIndexOrThrow("id")
-                val embCol = c.getColumnIndexOrThrow("embedding")
-                while (c.moveToNext()) {
-                    val item = map[c.getLong(idCol)] ?: continue
-                    val bytes = c.getBlob(embCol)
-                    val fb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
-                    val vector = FloatArray(fb.remaining())
-                    fb.get(vector)
-                    hits += SemanticHit(item, cosine(query, vector))
+    suspend fun search(query: FloatArray, allItems: List<MediaItem>, limit: Int = 100): List<SemanticHit> =
+        withContext(Dispatchers.IO) {
+            val map = allItems.associateBy { it.id }
+            val hits = mutableListOf<SemanticHit>()
+            synchronized(lock) {
+                db.readableDatabase.rawQuery("SELECT id, embedding FROM vectors", null).use { c ->
+                    val idCol = c.getColumnIndexOrThrow("id")
+                    val embCol = c.getColumnIndexOrThrow("embedding")
+                    while (c.moveToNext()) {
+                        val item = map[c.getLong(idCol)] ?: continue
+                        val fb = ByteBuffer.wrap(c.getBlob(embCol)).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
+                        val vector = FloatArray(fb.remaining())
+                        fb.get(vector)
+                        hits += SemanticHit(item, cosine(query, vector))
+                    }
                 }
             }
+            hits.sortedByDescending { it.score }.take(limit)
         }
-        hits.sortedByDescending { it.score }.take(limit)
-    }
 
     suspend fun count(): Int = withContext(Dispatchers.IO) {
         synchronized(lock) {
@@ -89,11 +81,11 @@ class SemanticMediaIndex(context: Context) {
     }
 
     private fun cosine(a: FloatArray, b: FloatArray): Double {
-        val n = minOf(a.size, b.size)
+        if (a.size != b.size) return 0.0
         var dot = 0.0
         var aa = 0.0
         var bb = 0.0
-        for (i in 0 until n) {
+        for (i in a.indices) {
             dot += a[i] * b[i]
             aa += a[i] * a[i]
             bb += b[i] * b[i]
@@ -101,11 +93,9 @@ class SemanticMediaIndex(context: Context) {
         return if (aa == 0.0 || bb == 0.0) 0.0 else dot / (sqrt(aa) * sqrt(bb))
     }
 
-    private class Helper(ctx: Context) : SQLiteOpenHelper(ctx, "local_photo_ai.db", null, 2) {
+    private class Helper(ctx: Context) : SQLiteOpenHelper(ctx, "local_photo_ai.db", null, 3) {
         override fun onCreate(db: SQLiteDatabase) {
-            db.execSQL(
-                "CREATE TABLE vectors(id INTEGER PRIMARY KEY, uri TEXT NOT NULL, name TEXT, path TEXT, size INTEGER NOT NULL DEFAULT 0, date_added INTEGER NOT NULL DEFAULT 0, embedding BLOB NOT NULL)"
-            )
+            db.execSQL("CREATE TABLE vectors(id INTEGER PRIMARY KEY, uri TEXT NOT NULL, name TEXT, path TEXT, size INTEGER NOT NULL DEFAULT 0, date_added INTEGER NOT NULL DEFAULT 0, embedding BLOB NOT NULL)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_vectors_date ON vectors(date_added)")
         }
 
@@ -114,6 +104,10 @@ class SemanticMediaIndex(context: Context) {
                 db.execSQL("ALTER TABLE vectors ADD COLUMN size INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE vectors ADD COLUMN date_added INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_vectors_date ON vectors(date_added)")
+            }
+            if (oldVersion < 3) {
+                db.execSQL("DROP TABLE IF EXISTS vectors")
+                onCreate(db)
             }
         }
     }
