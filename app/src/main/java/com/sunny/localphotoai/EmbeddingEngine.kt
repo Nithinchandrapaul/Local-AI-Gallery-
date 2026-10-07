@@ -28,6 +28,14 @@ class EmbeddingEngine(private val context: Context) {
         if (embedder != null) return@withContext true
         lastError = null
 
+        // Explicitly attempt native library load if needed
+        runCatching {
+            System.loadLibrary("litertlm_jni")
+            Log.i("EmbeddingEngine", "Preloaded liblitertlm_jni.so successfully")
+        }.onFailure { t ->
+            Log.w("EmbeddingEngine", "Notice: System.loadLibrary('litertlm_jni'): ${t.message}")
+        }
+
         // 1. Primary path: Direct zero-copy loading from APK assets
         try {
             val options = UniversalEmbedderOptions.builder()

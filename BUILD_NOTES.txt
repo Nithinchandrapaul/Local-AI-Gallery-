@@ -16,3 +16,4 @@ Version History:
 - V1.3.0: Semantic search, exact duplicates (SHA-256), visual similarity (dHash), blur and low-resolution heuristics.
 - V1.4.0: WhatsApp Intelligence Dashboard (sent vs received classification, multi-factor likely-forwarded confidence, WhatsApp large files, and WhatsApp duplicate grouping).
 - V1.5.0: Visual Quality Intelligence (multi-factor quality scoring combining sharpness, exposure, resolution, and compression; burst sequence grouping with best-shot keeper ranking; explainable quality reason tags).
+- V1.5.2: LiteRT-LM JNI Native Library Resolution Fix (enforced 64-bit arm64-v8a/x86_64 ABI filters to eliminate incomplete 32-bit runtimes missing liblitertlm_jni.so, configured jniLibs.useLegacyPackaging=true, and added explicit JNI preloading).

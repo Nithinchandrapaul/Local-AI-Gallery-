@@ -17,6 +17,16 @@ from pathlib import Path
 from datetime import datetime
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Ensure git and gh are on PATH
+for extra_bin in [
+    r"C:\Users\Code\AppData\Local\hermes\tools\git-bin\cmd",
+    r"C:\Program Files\Git\cmd",
+    r"C:\Program Files\GitHub CLI"
+]:
+    if os.path.exists(extra_bin) and extra_bin not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = extra_bin + os.pathsep + os.environ.get("PATH", "")
+
 WATCHDOG_DIR = REPO_ROOT / ".watchdog"
 STATE_FILE = WATCHDOG_DIR / "state.json"
 COMPLETED_FILE = WATCHDOG_DIR / "completed.json"
@@ -142,6 +152,19 @@ def verify_apk(apk_path: Path) -> tuple[bool, dict]:
             v1_sigs = [n for n in names if n.startswith("META-INF/") and (n.endswith(".RSA") or n.endswith(".DSA") or n.endswith(".EC"))]
             if v1_sigs:
                 details["signature_v1"] = True
+
+            # Verify native libraries and ABI integrity
+            so_files = [n for n in names if n.startswith("lib/") and n.endswith(".so")]
+            details["native_libs_count"] = len(so_files)
+            abi_folders = set(n.split("/")[1] for n in so_files)
+            details["abis"] = sorted(list(abi_folders))
+            
+            # Verify liblitertlm_jni.so exists in all packaged ABIs
+            for abi in abi_folders:
+                expected_so = f"lib/{abi}/liblitertlm_jni.so"
+                if expected_so not in names:
+                    details["error"] = f"ABI {abi} is missing liblitertlm_jni.so!"
+                    return False, details
 
     except zipfile.BadZipFile as e:
         details["error"] = f"Corrupted APK zip: {e}"
