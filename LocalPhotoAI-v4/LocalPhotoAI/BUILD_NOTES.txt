@@ -1,0 +1,17 @@
+Local Photo AI v0.2
+
+Changes from v0.1:
+1. Added Clean tab.
+2. Added exact duplicate detector (SHA-256).
+3. Added visually-similar candidate detector (average hash + Hamming distance).
+4. Added blur heuristic using Laplacian variance.
+5. Added >10 MB candidates.
+6. Added screenshot candidates based on display name.
+7. Added automatic full-library semantic indexing after Start AI.
+8. Search results now preserve SemanticRetriever score ordering.
+9. Bulk delete remains protected by Android MediaStore confirmation.
+10. Version bumped to 0.2.0 / versionCode 2.
+
+Known limitation:
+- This source package has not been compiled in this environment because an Android SDK/Gradle installation is not available here.
+- The MediaPipe Retrieval APIs are current APIs; if a future dependency release changes a signature, pin the known-good tasks-retrieval version in app/build.gradle.kts.
