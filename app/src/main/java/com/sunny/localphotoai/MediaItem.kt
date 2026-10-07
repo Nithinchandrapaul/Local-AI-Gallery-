@@ -16,7 +16,9 @@ data class MediaItem(
     val dHash: Long? = null,
     val isScreenshot: Boolean = false,
     val isWhatsApp: Boolean = false,
-    val isLikelyForwarded: Boolean = false
+    val isLikelyForwarded: Boolean = false,
+    val isBlurry: Boolean = false,
+    val isLowResolution: Boolean = false
 ) {
     val sizeMb: Double get() = size / 1024.0 / 1024.0
 }
