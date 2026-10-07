@@ -12,7 +12,7 @@ A privacy-first Android photo search and cleanup app.
 - Large-file detection.
 - Review-before-delete workflow.
 - Android protected deletion confirmation through MediaStore.createDeleteRequest().
-- AI model is downloaded to the phone and photo processing stays on-device.
+- AI model is bundled into the APK and photo processing stays on-device. No model download is required after installation.\n\n## V1.2 Smart Cleanup\n- Explainable keeper recommendation for exact duplicate groups.\n- Reviewable recommended deletion set.\n- Incremental AI indexing and compact 256-dimensional stored embeddings.
 
 ## Build
 
