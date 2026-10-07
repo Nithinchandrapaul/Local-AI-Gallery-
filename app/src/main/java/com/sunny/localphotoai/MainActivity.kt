@@ -79,9 +79,9 @@ fun LocalPhotoAIApp() {
                         TextButton(enabled = !busy && permission, onClick = {
                             scope.launch {
                                 busy = true
-                                status = "Downloading/loading AI model..."
+                                status = "Loading on-device AI..."
                                 val ok = embedder.initialize()
-                                if (!ok) status = "AI model could not be loaded. Check internet and retry."
+                                if (!ok) status = "On-device AI could not be loaded. The bundled model is unavailable."
                                 else {
                                     val currentIds = items.map { it.id }.toSet()
                                     index.removeMissing(currentIds)
@@ -274,7 +274,7 @@ private fun CleanupScreen(
     onDelete: (List<MediaItem>) -> Unit
 ) {
     val candidates = report?.let {
-        (it.exactDuplicates.flatten().drop(1) +
+        (it.recommendedDeleteIds.mapNotNull { id -> items.firstOrNull { item -> item.id == id } } +
          it.screenshots +
          it.largeFiles +
          it.likelyForwarded).distinctBy { x -> x.id }
@@ -290,12 +290,13 @@ private fun CleanupScreen(
         Text(status)
         report?.let {
             Text("Exact duplicate groups: ${it.exactDuplicates.size}")
+            Text("AI keeper recommendations: ${it.keeperIds.size}")
             Text("Visually similar groups: ${it.visualGroups.size}")
             Text("Screenshots: ${it.screenshots.size}")
             Text("WhatsApp: ${it.whatsapp.size}")
             Text("Likely forwarded: ${it.likelyForwarded.size}")
             Text("Large files >10 MB: ${it.largeFiles.size}")
-            Text("Duplicate space recoverable: ${"%.1f".format(it.totalRecoverableBytes / 1024.0 / 1024.0)} MB")
+            Text("Recoverable duplicate space: ${"%.1f".format(it.totalRecoverableBytes / 1024.0 / 1024.0)} MB")
         }
     }
 }
