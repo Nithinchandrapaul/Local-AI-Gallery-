@@ -16,7 +16,10 @@ data class MediaItem(
     val dHash: Long? = null,
     val isScreenshot: Boolean = false,
     val isWhatsApp: Boolean = false,
+    val isWhatsAppSent: Boolean = false,
+    val isWhatsAppReceived: Boolean = false,
     val isLikelyForwarded: Boolean = false,
+    val whatsAppForwardConfidence: Int = 0,
     val isBlurry: Boolean = false,
     val isLowResolution: Boolean = false
 ) {
