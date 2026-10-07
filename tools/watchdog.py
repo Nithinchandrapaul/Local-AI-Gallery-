@@ -166,6 +166,18 @@ def verify_apk(apk_path: Path) -> tuple[bool, dict]:
                     details["error"] = f"ABI {abi} is missing liblitertlm_jni.so!"
                     return False, details
 
+            # Verify ActivationDataType class is bundled in DEX
+            activation_found = False
+            for dex in [n for n in names if n.endswith('.dex')]:
+                dex_data = z.read(dex)
+                if b'Lcom/google/ai/edge/litertlm/ActivationDataType;' in dex_data:
+                    activation_found = True
+                    break
+            details["activation_data_type"] = activation_found
+            if not activation_found:
+                details["error"] = "Lcom/google/ai/edge/litertlm/ActivationDataType; is missing from APK DEX files!"
+                return False, details
+
     except zipfile.BadZipFile as e:
         details["error"] = f"Corrupted APK zip: {e}"
         return False, details

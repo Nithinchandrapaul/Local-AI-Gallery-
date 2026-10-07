@@ -12,8 +12,8 @@ android {
         applicationId = "com.sunny.localphotoai"
         minSdk = 31
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.5.2"
+        versionCode = 10
+        versionName = "1.5.3"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -43,6 +43,7 @@ kotlin {
 
 dependencies {
     implementation("com.google.mediapipe:tasks-retrieval:latest.release")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
 
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.11.0")
