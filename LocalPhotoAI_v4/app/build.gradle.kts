@@ -25,9 +25,10 @@ android {
         resources.excludes += "/META-INF/{LGPL2.1,AL2.0}"
     }
 
-    kotlin {
-        jvmToolchain(21)
-    }
+}
+
+kotlin {
+    jvmToolchain(21)
 }
 
 dependencies {
