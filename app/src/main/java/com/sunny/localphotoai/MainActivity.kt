@@ -255,6 +255,41 @@ private fun SearchScreen(
             placeholder = { Text("e.g. receipts, my car, screenshots of payments") },
             singleLine = true
         )
+        val suggestions = listOf(
+            "receipts",
+            "payment screenshots",
+            "my car",
+            "family photos",
+            "documents",
+            "travel photos",
+            "memes",
+            "WhatsApp images"
+        )
+        Text("Try a smart search", style = MaterialTheme.typography.labelLarge)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            suggestions.take(3).forEach { suggestion ->
+                AssistChip(
+                    onClick = { onQuery(suggestion) },
+                    label = { Text(suggestion) },
+                    enabled = !busy
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            suggestions.drop(3).take(3).forEach { suggestion ->
+                AssistChip(
+                    onClick = { onQuery(suggestion) },
+                    label = { Text(suggestion) },
+                    enabled = !busy
+                )
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(enabled = query.isNotBlank() && !busy, onClick = onSearch) { Text("Search") }
             OutlinedButton(enabled = !busy, onClick = onRescan) { Text("Rescan") }
