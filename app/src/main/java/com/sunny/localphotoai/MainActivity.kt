@@ -78,13 +78,25 @@ fun LocalPhotoAIApp() {
                                 val ok = embedder.initialize()
                                 if (!ok) status = "AI model could not be loaded. Check internet and retry."
                                 else {
-                                    status = "Indexing ${items.size} photos..."
+                                    val currentIds = items.map { it.id }.toSet()
+                                    index.removeMissing(currentIds)
+                                    var updated = 0
+                                    var unchanged = 0
                                     items.forEachIndexed { i, item ->
-                                        val e = embedder.embedImage(item.uri)
-                                        if (e != null) index.put(item, e)
-                                        if (i % 10 == 0) status = "Indexed ${i + 1}/${items.size}"
+                                        if (index.isCurrent(item)) {
+                                            unchanged++
+                                        } else {
+                                            val e = embedder.embedImage(item.uri)
+                                            if (e != null) {
+                                                index.put(item, e)
+                                                updated++
+                                            }
+                                        }
+                                        if (i % 10 == 0 || i == items.lastIndex) {
+                                            status = "Indexed ${i + 1}/${items.size} • $updated updated • $unchanged unchanged"
+                                        }
                                     }
-                                    status = "AI index ready: ${index.count()} photos"
+                                    status = "AI index ready: ${index.count()} photos • $updated updated"
                                 }
                                 busy = false
                             }

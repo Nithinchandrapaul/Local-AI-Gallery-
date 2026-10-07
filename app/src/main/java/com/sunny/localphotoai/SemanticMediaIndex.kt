@@ -1,11 +1,12 @@
 package com.sunny.localphotoai
 
 import android.content.Context
-import android.net.Uri
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.sqrt
 
 data class SemanticHit(val item: MediaItem, val score: Double)
@@ -16,41 +17,73 @@ class SemanticMediaIndex(context: Context) {
 
     suspend fun put(item: MediaItem, embedding: FloatArray) = withContext(Dispatchers.IO) {
         val bytes = ByteArray(embedding.size * 4)
-        java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).asFloatBuffer().put(embedding)
+        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().put(embedding)
         synchronized(lock) {
             db.writableDatabase.execSQL(
-                "INSERT OR REPLACE INTO vectors(id, uri, name, path, embedding) VALUES(?,?,?,?,?)",
-                arrayOf(item.id, item.uri.toString(), item.name, item.path, bytes)
+                "INSERT OR REPLACE INTO vectors(id, uri, name, path, size, date_added, embedding) VALUES(?,?,?,?,?,?,?)",
+                arrayOf(item.id, item.uri.toString(), item.name, item.path, item.size, item.dateAdded, bytes)
             )
         }
     }
 
-    suspend fun search(query: FloatArray, allItems: List<MediaItem>, limit: Int = 100): List<SemanticHit> =
-        withContext(Dispatchers.IO) {
-            val map = allItems.associateBy { it.id }
-            val hits = mutableListOf<SemanticHit>()
-            synchronized(lock) {
-                db.readableDatabase.rawQuery("SELECT id, embedding FROM vectors", null).use { c ->
-                    val idCol = c.getColumnIndexOrThrow("id")
-                    val embCol = c.getColumnIndexOrThrow("embedding")
-                    while (c.moveToNext()) {
-                        val id = c.getLong(idCol)
-                        val item = map[id] ?: continue
-                        val bytes = c.getBlob(embCol)
-                        val fb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
-                        val vector = FloatArray(fb.remaining())
-                        fb.get(vector)
-                        hits += SemanticHit(item, cosine(query, vector))
-                    }
+    suspend fun isCurrent(item: MediaItem): Boolean = withContext(Dispatchers.IO) {
+        synchronized(lock) {
+            db.readableDatabase.rawQuery(
+                "SELECT size, date_added FROM vectors WHERE id=?",
+                arrayOf(item.id.toString())
+            ).use { c ->
+                c.moveToFirst() &&
+                    c.getLong(0) == item.size &&
+                    c.getLong(1) == item.dateAdded
+            }
+        }
+    }
+
+    suspend fun removeMissing(currentIds: Set<Long>) = withContext(Dispatchers.IO) {
+        synchronized(lock) {
+            val database = db.writableDatabase
+            database.rawQuery("SELECT id FROM vectors", null).use { c ->
+                val stale = mutableListOf<Long>()
+                while (c.moveToNext()) {
+                    val id = c.getLong(0)
+                    if (id !in currentIds) stale += id
+                }
+                stale.forEach { id ->
+                    database.delete("vectors", "id=?", arrayOf(id.toString()))
                 }
             }
-            hits.sortedByDescending { it.score }.take(limit)
         }
+    }
+
+    suspend fun search(
+        query: FloatArray,
+        allItems: List<MediaItem>,
+        limit: Int = 100
+    ): List<SemanticHit> = withContext(Dispatchers.IO) {
+        val map = allItems.associateBy { it.id }
+        val hits = mutableListOf<SemanticHit>()
+        synchronized(lock) {
+            db.readableDatabase.rawQuery("SELECT id, embedding FROM vectors", null).use { c ->
+                val idCol = c.getColumnIndexOrThrow("id")
+                val embCol = c.getColumnIndexOrThrow("embedding")
+                while (c.moveToNext()) {
+                    val item = map[c.getLong(idCol)] ?: continue
+                    val bytes = c.getBlob(embCol)
+                    val fb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
+                    val vector = FloatArray(fb.remaining())
+                    fb.get(vector)
+                    hits += SemanticHit(item, cosine(query, vector))
+                }
+            }
+        }
+        hits.sortedByDescending { it.score }.take(limit)
+    }
 
     suspend fun count(): Int = withContext(Dispatchers.IO) {
         synchronized(lock) {
             db.readableDatabase.rawQuery("SELECT COUNT(*) FROM vectors", null).use {
-                it.moveToFirst(); it.getInt(0)
+                it.moveToFirst()
+                it.getInt(0)
             }
         }
     }
@@ -68,10 +101,20 @@ class SemanticMediaIndex(context: Context) {
         return if (aa == 0.0 || bb == 0.0) 0.0 else dot / (sqrt(aa) * sqrt(bb))
     }
 
-    private class Helper(ctx: Context) : SQLiteOpenHelper(ctx, "local_photo_ai.db", null, 1) {
+    private class Helper(ctx: Context) : SQLiteOpenHelper(ctx, "local_photo_ai.db", null, 2) {
         override fun onCreate(db: SQLiteDatabase) {
-            db.execSQL("CREATE TABLE vectors(id INTEGER PRIMARY KEY, uri TEXT NOT NULL, name TEXT, path TEXT, embedding BLOB NOT NULL)")
+            db.execSQL(
+                "CREATE TABLE vectors(id INTEGER PRIMARY KEY, uri TEXT NOT NULL, name TEXT, path TEXT, size INTEGER NOT NULL DEFAULT 0, date_added INTEGER NOT NULL DEFAULT 0, embedding BLOB NOT NULL)"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_vectors_date ON vectors(date_added)")
         }
-        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+            if (oldVersion < 2) {
+                db.execSQL("ALTER TABLE vectors ADD COLUMN size INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE vectors ADD COLUMN date_added INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_vectors_date ON vectors(date_added)")
+            }
+        }
     }
 }
