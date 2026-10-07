@@ -11,6 +11,8 @@ data class CleanupReport(
     val whatsapp: List<MediaItem>,
     val likelyForwarded: List<MediaItem>,
     val largeFiles: List<MediaItem>,
+    val keeperIds: Set<Long>,
+    val recommendedDeleteIds: Set<Long>,
     val totalRecoverableBytes: Long
 )
 
@@ -20,15 +22,11 @@ class PhotoAnalyzer(context: Context) {
     suspend fun analyze(items: List<MediaItem>, largeMb: Double = 10.0): CleanupReport =
         withContext(Dispatchers.Default) {
             val enriched = items.map { item ->
-                item.copy(
-                    sha256 = cleanup.sha256(item.uri),
-                    dHash = cleanup.dHash(item.uri)
-                )
+                item.copy(sha256 = cleanup.sha256(item.uri), dHash = cleanup.dHash(item.uri))
             }
 
             val exact = enriched.groupBy { it.sha256 }
-                .filterKeys { it != null }
-                .values.filter { it.size > 1 }
+                .filterKeys { it != null }.values.filter { it.size > 1 }
 
             val visual = mutableListOf<List<MediaItem>>()
             val used = mutableSetOf<Long>()
@@ -47,7 +45,25 @@ class PhotoAnalyzer(context: Context) {
                 }
             }
 
-            val duplicateBytes = exact.sumOf { group -> group.drop(1).sumOf { it.size } }
+            // Explainable keeper rule: prefer the largest/highest-resolution item,
+            // then newest item. Everything else in an exact-duplicate group is safe
+            // to recommend for review/deletion.
+            val keeperIds = mutableSetOf<Long>()
+            val deleteIds = mutableSetOf<Long>()
+            exact.forEach { group ->
+                val keeper = group.maxWithOrNull(
+                    compareBy<MediaItem> { it.width.toLong() * it.height.toLong() }
+                        .thenBy { it.size }
+                        .thenBy { it.dateAdded }
+                ) ?: return@forEach
+                keeperIds += keeper.id
+                group.filter { it.id != keeper.id }.forEach { deleteIds += it.id }
+            }
+
+            val duplicateBytes = exact.sumOf { group ->
+                group.filter { it.id in deleteIds }.sumOf { it.size }
+            }
+
             CleanupReport(
                 exactDuplicates = exact,
                 visualGroups = visual,
@@ -55,6 +71,8 @@ class PhotoAnalyzer(context: Context) {
                 whatsapp = enriched.filter { it.isWhatsApp },
                 likelyForwarded = enriched.filter { it.isLikelyForwarded },
                 largeFiles = enriched.filter { it.size >= (largeMb * 1024 * 1024).toLong() },
+                keeperIds = keeperIds,
+                recommendedDeleteIds = deleteIds,
                 totalRecoverableBytes = duplicateBytes
             )
         }
