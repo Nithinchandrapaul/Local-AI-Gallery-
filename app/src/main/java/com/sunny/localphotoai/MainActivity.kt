@@ -57,6 +57,9 @@ fun LocalPhotoAIApp() {
     var busy by remember { mutableStateOf(false) }
     var report by remember { mutableStateOf<CleanupReport?>(null) }
     var tab by remember { mutableIntStateOf(0) }
+    var assistantCommand by remember { mutableStateOf("") }
+    var assistantResponse by remember { mutableStateOf<AssistantResult?>(null) }
+    var assistantResults by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     val embedder = remember { EmbeddingEngine(context.applicationContext) }
     val index = remember { SemanticMediaIndex(context.applicationContext) }
     val analyzer = remember { PhotoAnalyzer(context.applicationContext) }
@@ -114,6 +117,7 @@ fun LocalPhotoAIApp() {
                 NavigationBar {
                     NavigationBarItem(tab == 0, { tab = 0 }, label = { Text("Search") }, icon = {})
                     NavigationBarItem(tab == 1, { tab = 1 }, label = { Text("Cleanup") }, icon = {})
+                    NavigationBarItem(tab == 2, { tab = 2 }, label = { Text("Assistant") }, icon = {})
                 }
             }
         ) { padding ->
@@ -141,7 +145,7 @@ fun LocalPhotoAIApp() {
                             status = "${items.size} photos found"
                         }
                     )
-                } else {
+                } else if (tab == 1) {
                     CleanupScreen(
                         items = items,
                         report = report,
@@ -161,6 +165,24 @@ fun LocalPhotoAIApp() {
                                 val uris = selected.map { it.uri }
                                 val intentSender = MediaStore.createDeleteRequest(context.contentResolver, uris).intentSender
                                 (context as Activity).startIntentSenderForResult(intentSender, 901, null, 0, 0, 0)
+                            }
+                        }
+                    )
+                } else {
+                    AssistantScreen(
+                        command = assistantCommand,
+                        onCommandChange = { assistantCommand = it },
+                        response = assistantResponse,
+                        results = assistantResults,
+                        busy = busy,
+                        onExecute = {
+                            scope.launch {
+                                busy = true
+                                val outcome = LocalGalleryAssistant.execute(assistantCommand, items, report, analyzer, embedder, index)
+                                report = outcome.report ?: report
+                                assistantResponse = outcome.result
+                                assistantResults = outcome.items
+                                busy = false
                             }
                         }
                     )
@@ -297,6 +319,49 @@ private fun SearchScreen(
         }
         Text(status, style = MaterialTheme.typography.bodySmall)
         PhotoGrid(results)
+    }
+}
+
+@Composable
+private fun AssistantScreen(
+    command: String,
+    onCommandChange: (String) -> Unit,
+    response: AssistantResult?,
+    results: List<MediaItem>,
+    busy: Boolean,
+    onExecute: () -> Unit
+) {
+    val examples = listOf(
+        "Clean up my gallery",
+        "Find my receipts",
+        "Show large WhatsApp files",
+        "Find blurry photos",
+        "Find duplicate photos",
+        "How much storage can I recover?"
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("AI Gallery Assistant", style = MaterialTheme.typography.headlineSmall)
+        Text("Ask the local assistant to search, inspect cleanup categories, or explain storage. Processing stays on this device.")
+        OutlinedTextField(value = command, onValueChange = onCommandChange, modifier = Modifier.fillMaxWidth(), label = { Text("Ask your gallery") }, placeholder = { Text("e.g. Find receipts from my gallery") }, minLines = 2, maxLines = 4)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            examples.take(3).forEach { example -> AssistChip(enabled = !busy, onClick = { onCommandChange(example) }, label = { Text(example) }) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            examples.drop(3).forEach { example -> AssistChip(enabled = !busy, onClick = { onCommandChange(example) }, label = { Text(example) }) }
+        }
+        Button(enabled = command.isNotBlank() && !busy, onClick = onExecute, modifier = Modifier.fillMaxWidth()) { Text(if (busy) "Working locally..." else "Ask Assistant") }
+        response?.let {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(it.message, style = MaterialTheme.typography.bodyLarge)
+                    it.action?.let { action -> Text("Action: " + action, style = MaterialTheme.typography.labelMedium) }
+                }
+            }
+        }
+        if (results.isNotEmpty()) {
+            Text(results.size.toString() + " photos", style = MaterialTheme.typography.titleMedium)
+            PhotoGrid(results)
+        }
     }
 }
 
