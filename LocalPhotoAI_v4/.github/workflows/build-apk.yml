@@ -39,12 +39,13 @@ jobs:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
       - name: Build debug APK
+        working-directory: LocalPhotoAI_v4
         run: gradle --no-daemon --stacktrace assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: LocalPhotoAI-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: LocalPhotoAI_v4/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
