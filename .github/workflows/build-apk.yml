@@ -48,8 +48,8 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: Build debug APK
-        run: gradle --no-daemon --stacktrace assembleDebug
+      - name: Build release APK and App Bundle
+        run: gradle --no-daemon --stacktrace assembleRelease bundleRelease
 
       - name: Verify bundled model is inside APK
         run: |
@@ -57,10 +57,23 @@ jobs:
           unzip -l "$APK" | grep 'assets/models/embeddinggemma-2-text-vision-440m.litertlm'
           ls -lh "$APK"
 
+      - name: Verify release bundle
+        run: |
+          BUNDLE=$(find app/build/outputs/bundle/release -name '*.aab' | head -1)
+          test -s "$BUNDLE"
+          ls -lh "$BUNDLE"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LocalPhotoAI-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: SunnyLocalAIGallery-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload App Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: SunnyLocalAIGallery-release-aab
+          path: app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 14
