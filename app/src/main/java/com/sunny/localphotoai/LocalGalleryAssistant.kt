@@ -29,16 +29,17 @@ object LocalGalleryAssistant {
                 val report = existingReport ?: analyzer.analyze(items)
                 val candidates = report.recommendedDeleteIds.mapNotNull { id -> items.firstOrNull { item -> item.id == id } } +
                     report.whatsAppReport.likelyForwarded + report.qualityReport.lowQualityPhotos
+                val distinctCandidates = candidates.distinctBy { it.id }
                 AssistantOutcome(
-                    AssistantResult("I prepared \$candidates.distinctBy { it.id }.size review candidates from duplicates, WhatsApp clutter, and low-quality photos. Nothing was deleted.", "Prepare cleanup review"),
-                    candidates.distinctBy { it.id }, report
+                    AssistantResult("I prepared ${distinctCandidates.size} review candidates from duplicates, WhatsApp clutter, and low-quality photos. Nothing was deleted.", "Prepare cleanup review"),
+                    distinctCandidates, report
                 )
             }
             lower.contains("duplicate") -> {
                 val report = existingReport ?: analyzer.analyze(items)
                 val candidates = report.recommendedDeleteIds.mapNotNull { id -> items.firstOrNull { item -> item.id == id } }
                 AssistantOutcome(
-                    AssistantResult("I found \$report.exactDuplicates.size exact-duplicate groups and selected \$candidates.size non-keeper photos for review. Deletion still requires your approval.", "Find duplicates"),
+                    AssistantResult("I found ${report.exactDuplicates.size} exact-duplicate groups and selected ${candidates.size} non-keeper photos for review. Deletion still requires your approval.", "Find duplicates"),
                     candidates, report
                 )
             }
@@ -46,20 +47,21 @@ object LocalGalleryAssistant {
                 val report = existingReport ?: analyzer.analyze(items)
                 val wa = report.whatsAppReport
                 AssistantOutcome(
-                    AssistantResult("WhatsApp intelligence found \$wa.totalCount images, including \$wa.receivedCount received and \$wa.sentCount sent. \$wa.likelyForwarded.size are likely-forwarded by heuristic.", "Inspect WhatsApp media"),
+                    AssistantResult("WhatsApp intelligence found ${wa.totalCount} images, including ${wa.receivedCount} received and ${wa.sentCount} sent. ${wa.likelyForwarded.size} are likely-forwarded by heuristic.", "Inspect WhatsApp media"),
                     wa.likelyForwarded, report
                 )
             }
             lower.contains("blurry") || lower.contains("blur") || lower.contains("low quality") -> {
                 val report = existingReport ?: analyzer.analyze(items)
                 AssistantOutcome(
-                    AssistantResult("I found \$report.qualityReport.lowQualityPhotos.size low-quality candidates, including \$report.qualityReport.blurryCount blurry photos. Review them before deletion.", "Inspect quality"),
+                    AssistantResult("I found ${report.qualityReport.lowQualityPhotos.size} low-quality candidates, including ${report.qualityReport.blurryCount} blurry photos. Review them before deletion.", "Inspect quality"),
                     report.qualityReport.lowQualityPhotos, report
                 )
             }
             else -> {
                 if (!embedder.initialize()) {
-                    AssistantOutcome(AssistantResult("The on-device AI model could not be loaded: \$embedder.lastError ?: "model unavailable""))
+                    val errorDetail = embedder.lastError ?: "model unavailable"
+                    AssistantOutcome(AssistantResult("The on-device AI model could not be loaded: $errorDetail"))
                 } else {
                     val vector = embedder.embedText(q)
                     if (vector == null || vector.isEmpty()) {
@@ -67,7 +69,7 @@ object LocalGalleryAssistant {
                     } else {
                         val matches = index.search(vector, items).map { it.item }
                         AssistantOutcome(
-                            AssistantResult("I searched your indexed gallery locally and found \$matches.size semantic matches for “\$q”.", "Semantic photo search"),
+                            AssistantResult("I searched your indexed gallery locally and found ${matches.size} semantic matches for \"$q\".", "Semantic photo search"),
                             matches
                         )
                     }
