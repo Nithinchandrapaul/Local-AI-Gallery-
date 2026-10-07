@@ -15,3 +15,4 @@ Privacy & Offline Invariant:
 Version History:
 - V1.3.0: Semantic search, exact duplicates (SHA-256), visual similarity (dHash), blur and low-resolution heuristics.
 - V1.4.0: WhatsApp Intelligence Dashboard (sent vs received classification, multi-factor likely-forwarded confidence, WhatsApp large files, and WhatsApp duplicate grouping).
+- V1.5.0: Visual Quality Intelligence (multi-factor quality scoring combining sharpness, exposure, resolution, and compression; burst sequence grouping with best-shot keeper ranking; explainable quality reason tags).

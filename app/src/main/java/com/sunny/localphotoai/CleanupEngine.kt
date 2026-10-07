@@ -70,6 +70,74 @@ class CleanupEngine(private val context: Context) {
         (sumSq / count) - mean * mean
     }.getOrNull()
 
+    /** Evaluates comprehensive visual quality combining sharpness, exposure, resolution, and compression. */
+    fun evaluateQuality(uri: Uri, width: Int, height: Int, size: Long): QualityEvaluation {
+        val blur = blurScore(uri) ?: 50.0
+        val isBlur = blur < 80.0
+        val minDim = minOf(width, height)
+        val isLowRes = minDim in 1..719
+
+        // Estimate exposure and dynamic range from decoded small sample
+        var isBadExposure = false
+        var meanLum = 128.0
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use {
+                val opts = BitmapFactory.Options().apply { inSampleSize = 8 }
+                BitmapFactory.decodeStream(BufferedInputStream(it), null, opts)
+            }?.let { sample ->
+                var totalLum = 0L
+                val samplePixels = sample.width * sample.height
+                if (samplePixels > 0) {
+                    for (y in 0 until sample.height step 4) {
+                        for (x in 0 until sample.width step 4) {
+                            totalLum += luminance(sample.getPixel(x, y))
+                        }
+                    }
+                    val sampledCount = (sample.height / 4) * (sample.width / 4)
+                    if (sampledCount > 0) {
+                        meanLum = totalLum.toDouble() / sampledCount
+                        isBadExposure = meanLum < 20.0 || meanLum > 235.0
+                    }
+                }
+                sample.recycle()
+            }
+        }
+
+        // Bytes per pixel estimation for compression artifacts
+        val pixels = maxOf(1L, width.toLong() * height.toLong())
+        val bytesPerPixel = size.toDouble() / pixels
+        val isHeavilyCompressed = bytesPerPixel < 0.04 && !isLowRes
+
+        // Aggregate 0-100 Score
+        var score = 70
+        if (isBlur) score -= 35
+        else if (blur > 200.0) score += 10
+
+        if (isLowRes) score -= 20
+        else if (minDim >= 1080) score += 10
+
+        if (isBadExposure) score -= 25
+        if (isHeavilyCompressed) score -= 15
+
+        val finalScore = score.coerceIn(5, 100)
+        val reasons = mutableListOf<String>()
+        if (isBlur) reasons += "Blurry (${blur.toInt()})"
+        if (isLowRes) reasons += "Low res (${minDim}p)"
+        if (isBadExposure) reasons += if (meanLum < 20.0) "Underexposed" else "Overexposed"
+        if (isHeavilyCompressed) reasons += "Heavy compression"
+
+        val reasonText = if (reasons.isEmpty()) "Good quality" else reasons.joinToString(", ")
+
+        return QualityEvaluation(
+            score = finalScore,
+            isBlurry = isBlur,
+            isBadExposure = isBadExposure,
+            isHeavilyCompressed = isHeavilyCompressed,
+            isLowResolution = isLowRes,
+            reason = reasonText
+        )
+    }
+
     fun hamming(a: Long, b: Long): Int = java.lang.Long.bitCount(a xor b)
 
     private fun luminance(pixel: Int): Int =
@@ -77,3 +145,12 @@ class CleanupEngine(private val context: Context) {
          (pixel shr 8 and 0xff) * 587 +
          (pixel and 0xff) * 114) / 1000
 }
+
+data class QualityEvaluation(
+    val score: Int,
+    val isBlurry: Boolean,
+    val isBadExposure: Boolean,
+    val isHeavilyCompressed: Boolean,
+    val isLowResolution: Boolean,
+    val reason: String
+)

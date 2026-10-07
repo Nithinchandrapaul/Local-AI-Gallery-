@@ -16,12 +16,24 @@ data class WhatsAppReport(
     val recoverableBytes: Long
 )
 
+data class QualityReport(
+    val blurryCount: Int,
+    val badExposureCount: Int,
+    val heavilyCompressedCount: Int,
+    val lowResolutionCount: Int,
+    val burstGroupsCount: Int,
+    val lowQualityPhotos: List<MediaItem>,
+    val burstGroups: List<List<MediaItem>>
+)
+
 data class CleanupReport(
     val exactDuplicates: List<List<MediaItem>>,
     val visualGroups: List<List<MediaItem>>,
+    val burstGroups: List<List<MediaItem>>,
     val screenshots: List<MediaItem>,
     val whatsapp: List<MediaItem>,
     val whatsAppReport: WhatsAppReport,
+    val qualityReport: QualityReport,
     val likelyForwarded: List<MediaItem>,
     val largeFiles: List<MediaItem>,
     val blurry: List<MediaItem>,
@@ -37,12 +49,16 @@ class PhotoAnalyzer(context: Context) {
     suspend fun analyze(items: List<MediaItem>, largeMb: Double = 10.0): CleanupReport =
         withContext(Dispatchers.Default) {
             val enriched = items.map { item ->
-                val blur = cleanup.blurScore(item.uri)
+                val qual = cleanup.evaluateQuality(item.uri, item.width, item.height, item.size)
                 item.copy(
                     sha256 = cleanup.sha256(item.uri),
                     dHash = cleanup.dHash(item.uri),
-                    isBlurry = blur != null && blur < 80.0,
-                    isLowResolution = minOf(item.width, item.height) < 720
+                    qualityScore = qual.score,
+                    isBlurry = qual.isBlurry,
+                    isBadExposure = qual.isBadExposure,
+                    isHeavilyCompressed = qual.isHeavilyCompressed,
+                    isLowResolution = qual.isLowResolution,
+                    qualityReason = qual.reason
                 )
             }
 
@@ -66,11 +82,34 @@ class PhotoAnalyzer(context: Context) {
                 }
             }
 
+            // Burst / Similar-shot sequence intelligence
+            val burstGroups = mutableListOf<List<MediaItem>>()
+            val burstUsed = mutableSetOf<Long>()
+            for (i in enriched.indices) {
+                val a = enriched[i]
+                if (a.id in burstUsed || a.dHash == null) continue
+                val bGroup = mutableListOf(a)
+                for (j in i + 1 until enriched.size) {
+                    val b = enriched[j]
+                    if (b.id in burstUsed || b.dHash == null) continue
+                    val timeClose = kotlin.math.abs(a.dateAdded - b.dateAdded) <= 15
+                    val visualClose = cleanup.hamming(a.dHash, b.dHash) <= 6
+                    if (timeClose && visualClose) {
+                        bGroup += b
+                    }
+                }
+                if (bGroup.size > 1) {
+                    bGroup.forEach { burstUsed += it.id }
+                    burstGroups += bGroup
+                }
+            }
+
             val keeperIds = mutableSetOf<Long>()
             val deleteIds = mutableSetOf<Long>()
             exact.forEach { group ->
                 val keeper = group.maxWithOrNull(
-                    compareBy<MediaItem> { it.width.toLong() * it.height.toLong() }
+                    compareBy<MediaItem> { it.qualityScore }
+                        .thenBy { it.width.toLong() * it.height.toLong() }
                         .thenBy { it.size }
                         .thenBy { it.dateAdded }
                 ) ?: return@forEach
@@ -103,12 +142,25 @@ class PhotoAnalyzer(context: Context) {
                 recoverableBytes = waRecoverable
             )
 
+            val lowQuality = enriched.filter { it.qualityScore < 45 || it.isBlurry || it.isBadExposure }
+            val qualityReport = QualityReport(
+                blurryCount = enriched.count { it.isBlurry },
+                badExposureCount = enriched.count { it.isBadExposure },
+                heavilyCompressedCount = enriched.count { it.isHeavilyCompressed },
+                lowResolutionCount = enriched.count { it.isLowResolution },
+                burstGroupsCount = burstGroups.size,
+                lowQualityPhotos = lowQuality,
+                burstGroups = burstGroups
+            )
+
             CleanupReport(
                 exactDuplicates = exact,
                 visualGroups = visual,
+                burstGroups = burstGroups,
                 screenshots = enriched.filter { it.isScreenshot },
                 whatsapp = waItems,
                 whatsAppReport = whatsAppReport,
+                qualityReport = qualityReport,
                 likelyForwarded = waLikelyForwarded,
                 largeFiles = enriched.filter { it.size >= (largeMb * 1024 * 1024).toLong() },
                 blurry = enriched.filter { it.isBlurry },

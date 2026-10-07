@@ -319,15 +319,16 @@ private fun CleanupScreen(
             "WA Sent" -> report.whatsAppReport.sentMedia
             "WA Large" -> report.whatsAppReport.largeMedia
             "Duplicates" -> report.recommendedDeleteIds.mapNotNull { id -> items.firstOrNull { it.id == id } }
+            "Low Quality" -> report.qualityReport.lowQualityPhotos
+            "Burst Shots" -> report.qualityReport.burstGroups.flatten().distinctBy { it.id }
             "Blurry" -> report.blurry
             "Screenshots" -> report.screenshots
             else -> {
                 (report.recommendedDeleteIds.mapNotNull { id -> items.firstOrNull { it.id == id } } +
                  report.whatsAppReport.likelyForwarded +
                  report.whatsAppReport.sentMedia +
-                 report.screenshots +
-                 report.blurry +
-                 report.lowResolution).distinctBy { x -> x.id }
+                 report.qualityReport.lowQualityPhotos +
+                 report.screenshots).distinctBy { x -> x.id }
             }
         }
     }
@@ -361,13 +362,15 @@ private fun CleanupScreen(
 
         if (report != null) {
             val wa = report.whatsAppReport
+            val q = report.qualityReport
+
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        "WhatsApp Intelligence Dashboard",
+                        "WhatsApp Intelligence",
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
@@ -397,6 +400,42 @@ private fun CleanupScreen(
                 }
             }
 
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "Visual Quality Intelligence",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        "Blurry: ${q.blurryCount} • Poor Exposure: ${q.badExposureCount} • Compression: ${q.heavilyCompressedCount} • Bursts: ${q.burstGroupsCount}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedCategory == "Low Quality",
+                            onClick = { selectedCategory = "Low Quality" },
+                            label = { Text("Low Quality (${q.lowQualityPhotos.size})") }
+                        )
+                        FilterChip(
+                            selected = selectedCategory == "Burst Shots",
+                            onClick = { selectedCategory = "Burst Shots" },
+                            label = { Text("Burst Sets (${q.burstGroupsCount})") }
+                        )
+                        FilterChip(
+                            selected = selectedCategory == "Duplicates",
+                            onClick = { selectedCategory = "Duplicates" },
+                            label = { Text("Duplicates (${report.exactDuplicates.size})") }
+                        )
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -405,16 +444,6 @@ private fun CleanupScreen(
                     selected = selectedCategory == "All",
                     onClick = { selectedCategory = "All" },
                     label = { Text("All Candidates") }
-                )
-                FilterChip(
-                    selected = selectedCategory == "Duplicates",
-                    onClick = { selectedCategory = "Duplicates" },
-                    label = { Text("Duplicates (${report.exactDuplicates.size})") }
-                )
-                FilterChip(
-                    selected = selectedCategory == "Blurry",
-                    onClick = { selectedCategory = "Blurry" },
-                    label = { Text("Blurry (${report.blurry.size})") }
                 )
                 FilterChip(
                     selected = selectedCategory == "Screenshots",
@@ -427,6 +456,8 @@ private fun CleanupScreen(
                 "WA Forwarded" -> "Likely forwarded (heuristic: compressed resolution, non-camera naming, low filesize). Review before deletion."
                 "WA Sent" -> "Sent copies stored in WhatsApp Sent folder. Redundant if you already have the original."
                 "WA Large" -> "WhatsApp photos and media exceeding 2 MB."
+                "Low Quality" -> "Photos with quality score < 45 (severe blur, poor exposure, or heavy compression artifacts)."
+                "Burst Shots" -> "Sequences of photos taken within seconds of each other. The highest quality photo is preserved."
                 "Duplicates" -> "Exact duplicate photos verified via SHA-256. Best quality photo is preserved."
                 "Blurry" -> "Photos with low sharpness (Laplacian variance < 80)."
                 "Screenshots" -> "Screen captures detected in screenshots directory."
@@ -507,8 +538,14 @@ private fun SelectablePhotoGrid(
                     onCheckedChange = { onToggleSelect(item.id) },
                     modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)
                 )
-                if (item.isWhatsAppSent || item.isLikelyForwarded) {
-                    val label = if (item.isWhatsAppSent) "Sent" else "${item.whatsAppForwardConfidence}% Fwd"
+
+                val label = when {
+                    item.isWhatsAppSent -> "Sent"
+                    item.isLikelyForwarded -> "${item.whatsAppForwardConfidence}% Fwd"
+                    item.qualityScore < 50 -> "Score ${item.qualityScore}"
+                    else -> null
+                }
+                if (label != null) {
                     Surface(
                         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
                         shape = MaterialTheme.shapes.extraSmall,

@@ -21,7 +21,11 @@ data class MediaItem(
     val isLikelyForwarded: Boolean = false,
     val whatsAppForwardConfidence: Int = 0,
     val isBlurry: Boolean = false,
-    val isLowResolution: Boolean = false
+    val isLowResolution: Boolean = false,
+    val qualityScore: Int = 50,
+    val isHeavilyCompressed: Boolean = false,
+    val isBadExposure: Boolean = false,
+    val qualityReason: String? = null
 ) {
     val sizeMb: Double get() = size / 1024.0 / 1024.0
 }
