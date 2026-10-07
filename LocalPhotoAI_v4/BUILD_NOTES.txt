@@ -1,0 +1,11 @@
+BUILD NOTES
+
+This is a clean repository-root Android project. Do not put it inside another project folder.
+
+Required:
+- JDK 21
+- Android SDK 36
+- Gradle 8.13 (GitHub Actions installs it)
+- Internet only for downloading Gradle dependencies and the on-device EmbeddingGemma model.
+
+The app does not upload the user's photos to a server. The model is downloaded from Hugging Face on first use.
