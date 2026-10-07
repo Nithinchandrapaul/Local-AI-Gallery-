@@ -1,11 +1,17 @@
 BUILD NOTES
 
-This is a clean repository-root Android project. Do not put it inside another project folder.
+Sunny Local AI Gallery - Clean Root Android Project
 
 Required:
 - JDK 21
 - Android SDK 36
-- Gradle 8.13 (GitHub Actions installs it)
-- Internet only for downloading Gradle dependencies and the on-device EmbeddingGemma model.
+- Gradle 8.13
 
-The app does not upload the user's photos to a server. The model is downloaded from Hugging Face on first use.
+Privacy & Offline Invariant:
+- The app NEVER uploads user photos to any external server.
+- The 440M EmbeddingGemma 2 LiteRT-LM model is bundled directly inside the APK assets.
+- 100% on-device AI search, semantic indexing, and cleanup intelligence.
+
+Version History:
+- V1.3.0: Semantic search, exact duplicates (SHA-256), visual similarity (dHash), blur and low-resolution heuristics.
+- V1.4.0: WhatsApp Intelligence Dashboard (sent vs received classification, multi-factor likely-forwarded confidence, WhatsApp large files, and WhatsApp duplicate grouping).

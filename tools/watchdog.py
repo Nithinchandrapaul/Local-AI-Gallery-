@@ -214,10 +214,25 @@ Local path: {dest_apk_path}
     log(f"SHA256: {sha256}")
     return dest_apk_path
 
+import re
+
+def get_gradle_version() -> str:
+    gradle_file = REPO_ROOT / "app" / "build.gradle.kts"
+    if gradle_file.exists():
+        with open(gradle_file, "r", encoding="utf-8") as f:
+            for line in f:
+                if "versionName" in line:
+                    match = re.search(r'versionName\s*=\s*["\']([^"\']+)["\']', line)
+                    if match:
+                        return match.group(1)
+    return "1.3.0"
+
 def main():
     state = init_state()
-    version = state.get("current_version", "1.3.0")
+    version = get_gradle_version()
     version_tag = f"V{version.rsplit('.', 1)[0]}" if '.' in version else f"V{version}"
+    state["current_version"] = version
+    save_state(state)
     log(f"Starting watchdog check for version {version} ({version_tag})")
 
     # Check if this version is already completed
@@ -267,11 +282,18 @@ def main():
     download_dir.mkdir(parents=True, exist_ok=True)
 
     log(f"Downloading artifacts from run {run_id}...")
+    # Attempt to download specific installable artifact first
     dl_res = subprocess.run(
-        ["gh", "run", "download", run_id, "--repo", REPO_NAME, "--dir", str(download_dir)],
+        ["gh", "run", "download", run_id, "--repo", REPO_NAME, "--pattern", "*installable*", "--dir", str(download_dir)],
         capture_output=True,
         text=True
     )
+    if dl_res.returncode != 0 or not list(download_dir.glob("**/*.apk")):
+        dl_res = subprocess.run(
+            ["gh", "run", "download", run_id, "--repo", REPO_NAME, "--dir", str(download_dir)],
+            capture_output=True,
+            text=True
+        )
     if dl_res.returncode != 0:
         log_failure(f"Failed to download artifacts: {dl_res.stderr}")
         return 1

@@ -78,7 +78,7 @@ jobs:
       - name: Upload installable debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: SunnyLocalAIGallery-v1.3-installable-apk
+          name: SunnyLocalAIGallery-installable-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14

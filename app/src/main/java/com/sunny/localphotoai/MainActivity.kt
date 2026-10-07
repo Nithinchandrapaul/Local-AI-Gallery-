@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -308,34 +309,219 @@ private fun CleanupScreen(
     onAnalyze: () -> Unit,
     onDelete: (List<MediaItem>) -> Unit
 ) {
-    val candidates = report?.let {
-        (it.recommendedDeleteIds.mapNotNull { id -> items.firstOrNull { item -> item.id == id } } +
-         it.screenshots +
-         it.largeFiles +
-         it.likelyForwarded +
-         it.blurry +
-         it.lowResolution).distinctBy { x -> x.id }
-    } ?: emptyList()
+    var selectedCategory by remember { mutableStateOf("All") }
+    var selectedIds by remember { mutableStateOf(setOf<Long>()) }
 
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = !busy && items.isNotEmpty(), onClick = onAnalyze) { Text("Analyze") }
-            OutlinedButton(enabled = candidates.isNotEmpty() && !busy, onClick = { onDelete(candidates) }) {
-                Text("Review / Delete ${candidates.size}")
+    val displayItems = remember(report, selectedCategory) {
+        if (report == null) emptyList()
+        else when (selectedCategory) {
+            "WA Forwarded" -> report.whatsAppReport.likelyForwarded
+            "WA Sent" -> report.whatsAppReport.sentMedia
+            "WA Large" -> report.whatsAppReport.largeMedia
+            "Duplicates" -> report.recommendedDeleteIds.mapNotNull { id -> items.firstOrNull { it.id == id } }
+            "Blurry" -> report.blurry
+            "Screenshots" -> report.screenshots
+            else -> {
+                (report.recommendedDeleteIds.mapNotNull { id -> items.firstOrNull { it.id == id } } +
+                 report.whatsAppReport.likelyForwarded +
+                 report.whatsAppReport.sentMedia +
+                 report.screenshots +
+                 report.blurry +
+                 report.lowResolution).distinctBy { x -> x.id }
             }
         }
-        Text(status)
-        report?.let {
-            Text("Exact duplicate groups: ${it.exactDuplicates.size}")
-            Text("AI keeper recommendations: ${it.keeperIds.size}")
-            Text("Visually similar groups: ${it.visualGroups.size}")
-            Text("Screenshots: ${it.screenshots.size}")
-            Text("WhatsApp: ${it.whatsapp.size}")
-            Text("Likely forwarded: ${it.likelyForwarded.size}")
-            Text("Large files >10 MB: ${it.largeFiles.size}")
-            Text("Blurry photos: ${it.blurry.size}")
-            Text("Low-resolution photos: ${it.lowResolution.size}")
-            Text("Recoverable duplicate space: ${"%.1f".format(it.totalRecoverableBytes / 1024.0 / 1024.0)} MB")
+    }
+
+    LaunchedEffect(displayItems) {
+        selectedIds = displayItems.map { it.id }.toSet()
+    }
+
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(enabled = !busy && items.isNotEmpty(), onClick = onAnalyze) {
+                Text(if (report == null) "Analyze Gallery" else "Re-Analyze")
+            }
+            if (report != null && displayItems.isNotEmpty()) {
+                val selectedItems = displayItems.filter { it.id in selectedIds }
+                Button(
+                    enabled = selectedItems.isNotEmpty() && !busy,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    onClick = { onDelete(selectedItems) }
+                ) {
+                    Text("Delete Selected (${selectedItems.size})")
+                }
+            }
+        }
+
+        Text(status, style = MaterialTheme.typography.bodySmall)
+
+        if (report != null) {
+            val wa = report.whatsAppReport
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "WhatsApp Intelligence Dashboard",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        "Total: ${wa.totalCount} media • ${"%.1f".format(wa.totalBytes / 1024.0 / 1024.0)} MB (Received: ${wa.receivedCount}, Sent: ${wa.sentCount})",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedCategory == "WA Forwarded",
+                            onClick = { selectedCategory = "WA Forwarded" },
+                            label = { Text("Forwarded (${wa.likelyForwarded.size})") }
+                        )
+                        FilterChip(
+                            selected = selectedCategory == "WA Sent",
+                            onClick = { selectedCategory = "WA Sent" },
+                            label = { Text("Sent (${wa.sentCount})") }
+                        )
+                        FilterChip(
+                            selected = selectedCategory == "WA Large",
+                            onClick = { selectedCategory = "WA Large" },
+                            label = { Text("Large >2MB (${wa.largeMedia.size})") }
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FilterChip(
+                    selected = selectedCategory == "All",
+                    onClick = { selectedCategory = "All" },
+                    label = { Text("All Candidates") }
+                )
+                FilterChip(
+                    selected = selectedCategory == "Duplicates",
+                    onClick = { selectedCategory = "Duplicates" },
+                    label = { Text("Duplicates (${report.exactDuplicates.size})") }
+                )
+                FilterChip(
+                    selected = selectedCategory == "Blurry",
+                    onClick = { selectedCategory = "Blurry" },
+                    label = { Text("Blurry (${report.blurry.size})") }
+                )
+                FilterChip(
+                    selected = selectedCategory == "Screenshots",
+                    onClick = { selectedCategory = "Screenshots" },
+                    label = { Text("Screenshots (${report.screenshots.size})") }
+                )
+            }
+
+            val reasonHint = when (selectedCategory) {
+                "WA Forwarded" -> "Likely forwarded (heuristic: compressed resolution, non-camera naming, low filesize). Review before deletion."
+                "WA Sent" -> "Sent copies stored in WhatsApp Sent folder. Redundant if you already have the original."
+                "WA Large" -> "WhatsApp photos and media exceeding 2 MB."
+                "Duplicates" -> "Exact duplicate photos verified via SHA-256. Best quality photo is preserved."
+                "Blurry" -> "Photos with low sharpness (Laplacian variance < 80)."
+                "Screenshots" -> "Screen captures detected in screenshots directory."
+                else -> "All identified cleanup candidates. Review carefully before deleting."
+            }
+            Text(
+                reasonHint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (displayItems.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "${selectedIds.intersect(displayItems.map { it.id }.toSet()).size} of ${displayItems.size} selected",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Row {
+                        TextButton(onClick = { selectedIds = displayItems.map { it.id }.toSet() }) {
+                            Text("Select All")
+                        }
+                        TextButton(onClick = { selectedIds = emptySet() }) {
+                            Text("Deselect All")
+                        }
+                    }
+                }
+            }
+
+            SelectablePhotoGrid(
+                items = displayItems,
+                selectedIds = selectedIds,
+                onToggleSelect = { id ->
+                    selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelectablePhotoGrid(
+    items: List<MediaItem>,
+    selectedIds: Set<Long>,
+    onToggleSelect: (Long) -> Unit
+) {
+    if (items.isEmpty()) {
+        Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+            Text("No photos in this category")
+        }
+        return
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(110.dp),
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        items(items, key = { it.id }) { item ->
+            val isSelected = item.id in selectedIds
+            Box(
+                modifier = Modifier
+                    .aspectRatio(1f)
+                    .fillMaxWidth()
+                    .clickable { onToggleSelect(item.id) }
+            ) {
+                AsyncImage(
+                    model = item.uri,
+                    contentDescription = item.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = { onToggleSelect(item.id) },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)
+                )
+                if (item.isWhatsAppSent || item.isLikelyForwarded) {
+                    val label = if (item.isWhatsAppSent) "Sent" else "${item.whatsAppForwardConfidence}% Fwd"
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                        shape = MaterialTheme.shapes.extraSmall,
+                        modifier = Modifier.align(Alignment.BottomStart).padding(4.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }

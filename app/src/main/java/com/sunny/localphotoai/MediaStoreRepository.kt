@@ -39,12 +39,33 @@ class MediaStoreRepository(private val context: Context) {
                 val n = c.getString(name) ?: ""
                 val p = c.getString(path) ?: ""
                 val lower = "$n $p".lowercase()
-                val wa = lower.contains("whatsapp")
-                val sent = lower.contains("whatsapp images/sent") || lower.contains("whatsapp/whatsapp images/sent")
-                val likelyForwarded = wa && !sent && (
-                    lower.contains("images") || lower.contains("media") ||
-                    c.getLong(size) < 900_000 || n.startsWith("IMG-")
+                val wa = lower.contains("whatsapp") || lower.contains("com.whatsapp")
+                val sent = wa && (
+                    lower.contains("/sent") || lower.contains("\\sent") ||
+                    lower.contains("whatsapp images/sent") || lower.contains("sent/")
                 )
+                val received = wa && !sent
+
+                // Multi-factor confidence heuristic for likely-forwarded media (0-100)
+                var forwardConfidence = 0
+                if (received) {
+                    forwardConfidence += 25
+                    if (n.startsWith("IMG-") && n.contains("-WA")) {
+                        forwardConfidence += 25
+                    }
+                    val w = c.getInt(width)
+                    val h = c.getInt(height)
+                    val maxDim = maxOf(w, h)
+                    if (maxDim in 800..1600) {
+                        forwardConfidence += 25
+                    }
+                    val fileSize = c.getLong(size)
+                    if (fileSize in 20_000..650_000) {
+                        forwardConfidence += 25
+                    }
+                }
+                val likelyForwarded = forwardConfidence >= 50
+
                 result += MediaItem(
                     id = c.getLong(id),
                     uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, c.getLong(id)),
@@ -57,7 +78,10 @@ class MediaStoreRepository(private val context: Context) {
                     mimeType = c.getString(mime) ?: "image/*",
                     isScreenshot = lower.contains("screenshot") || lower.contains("screen_shot"),
                     isWhatsApp = wa,
-                    isLikelyForwarded = likelyForwarded
+                    isWhatsAppSent = sent,
+                    isWhatsAppReceived = received,
+                    isLikelyForwarded = likelyForwarded,
+                    whatsAppForwardConfidence = forwardConfidence
                 )
             }
         }
