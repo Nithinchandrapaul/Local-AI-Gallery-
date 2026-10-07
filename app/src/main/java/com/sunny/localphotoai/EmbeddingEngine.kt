@@ -29,7 +29,7 @@ class EmbeddingEngine(private val context: Context) {
 
     suspend fun embedText(text: String): FloatArray? = withContext(Dispatchers.Default) {
         runCatching {
-            embedder?.embedText(text)?.embeddings()?.firstOrNull()?.floatEmbedding()?.toFloatArray()
+            embedder?.embedText(text)?.embeddings()?.firstOrNull()?.floatEmbedding()
         }.getOrNull()
     }
 
@@ -42,7 +42,7 @@ class EmbeddingEngine(private val context: Context) {
             val mp = BitmapImageBuilder(resized).build()
             val result = embedder?.embedImage(mp)
             resized.recycle()
-            result?.embeddings()?.firstOrNull()?.floatEmbedding()?.toFloatArray()
+            result?.embeddings()?.firstOrNull()?.floatEmbedding()
         }.getOrNull()
     }
 
