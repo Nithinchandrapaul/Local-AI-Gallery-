@@ -11,6 +11,8 @@ data class CleanupReport(
     val whatsapp: List<MediaItem>,
     val likelyForwarded: List<MediaItem>,
     val largeFiles: List<MediaItem>,
+    val blurry: List<MediaItem>,
+    val lowResolution: List<MediaItem>,
     val keeperIds: Set<Long>,
     val recommendedDeleteIds: Set<Long>,
     val totalRecoverableBytes: Long
@@ -22,7 +24,13 @@ class PhotoAnalyzer(context: Context) {
     suspend fun analyze(items: List<MediaItem>, largeMb: Double = 10.0): CleanupReport =
         withContext(Dispatchers.Default) {
             val enriched = items.map { item ->
-                item.copy(sha256 = cleanup.sha256(item.uri), dHash = cleanup.dHash(item.uri))
+                val blur = cleanup.blurScore(item.uri)
+                item.copy(
+                    sha256 = cleanup.sha256(item.uri),
+                    dHash = cleanup.dHash(item.uri),
+                    isBlurry = blur != null && blur < 80.0,
+                    isLowResolution = minOf(item.width, item.height) < 720
+                )
             }
 
             val exact = enriched.groupBy { it.sha256 }
@@ -45,9 +53,6 @@ class PhotoAnalyzer(context: Context) {
                 }
             }
 
-            // Explainable keeper rule: prefer the largest/highest-resolution item,
-            // then newest item. Everything else in an exact-duplicate group is safe
-            // to recommend for review/deletion.
             val keeperIds = mutableSetOf<Long>()
             val deleteIds = mutableSetOf<Long>()
             exact.forEach { group ->
@@ -71,6 +76,8 @@ class PhotoAnalyzer(context: Context) {
                 whatsapp = enriched.filter { it.isWhatsApp },
                 likelyForwarded = enriched.filter { it.isLikelyForwarded },
                 largeFiles = enriched.filter { it.size >= (largeMb * 1024 * 1024).toLong() },
+                blurry = enriched.filter { it.isBlurry },
+                lowResolution = enriched.filter { it.isLowResolution },
                 keeperIds = keeperIds,
                 recommendedDeleteIds = deleteIds,
                 totalRecoverableBytes = duplicateBytes
