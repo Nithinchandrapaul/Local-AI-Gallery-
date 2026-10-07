@@ -10,7 +10,8 @@ object LocalGalleryAssistant {
         existingReport: CleanupReport?,
         analyzer: PhotoAnalyzer,
         embedder: EmbeddingEngine,
-        index: SemanticMediaIndex
+        index: SemanticMediaIndex,
+        clusterEngine: AlbumClusterEngine? = null
     ): AssistantOutcome {
         val q = command.trim()
         if (q.isBlank()) return AssistantOutcome(AssistantResult("Tell me what you want to find or clean."))
@@ -20,6 +21,7 @@ object LocalGalleryAssistant {
                 AssistantOutcome(AssistantResult(
                     "Hello! I am your 100% on-device AI gallery assistant. You can ask me to:\n" +
                     "• Find specific photos ('receipts', 'family trip', 'car photos')\n" +
+                    "• Explore smart albums ('show my albums', 'event clusters')\n" +
                     "• Filter and inspect videos ('show videos', 'large videos >50MB')\n" +
                     "• Inspect recoverable storage ('how much space can I recover?')\n" +
                     "• Detect exact duplicates and review deletion candidates\n" +
@@ -28,6 +30,16 @@ object LocalGalleryAssistant {
                     "• Show all screenshots or large files (>10MB)",
                     "Capabilities overview"
                 ))
+            }
+            lower.contains("album") || lower.contains("cluster") || lower.contains("event") || lower.contains("memories") -> {
+                val engine = clusterEngine ?: AlbumClusterEngine(index)
+                val clusters = engine.clusterMedia(items)
+                val albumNames = clusters.take(4).joinToString(", ") { "${it.title} (${it.items.size})" }
+                val covers = clusters.map { it.coverItem }
+                AssistantOutcome(
+                    AssistantResult("I clustered your gallery into ${clusters.size} smart albums: $albumNames. Switch to the Albums tab to browse each collection.", "Smart Albums"),
+                    covers
+                )
             }
             lower.contains("large video") || (lower.contains("video") && (lower.contains("large") || lower.contains("big") || lower.contains("50mb") || lower.contains("size"))) -> {
                 val largeVids = items.filter { it.isLargeVideo }

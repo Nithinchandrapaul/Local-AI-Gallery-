@@ -51,6 +51,24 @@ class SemanticMediaIndex(context: Context) {
         }
     }
 
+    suspend fun getAllEmbeddings(): Map<Long, FloatArray> = withContext(Dispatchers.IO) {
+        val result = mutableMapOf<Long, FloatArray>()
+        synchronized(lock) {
+            db.readableDatabase.rawQuery("SELECT id, embedding FROM vectors", null).use { c ->
+                val idCol = c.getColumnIndexOrThrow("id")
+                val embCol = c.getColumnIndexOrThrow("embedding")
+                while (c.moveToNext()) {
+                    val id = c.getLong(idCol)
+                    val fb = ByteBuffer.wrap(c.getBlob(embCol)).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
+                    val vector = FloatArray(fb.remaining())
+                    fb.get(vector)
+                    result[id] = vector
+                }
+            }
+        }
+        result
+    }
+
     suspend fun search(query: FloatArray, allItems: List<MediaItem>, limit: Int = 100): List<SemanticHit> =
         withContext(Dispatchers.IO) {
             val map = allItems.associateBy { it.id }
@@ -80,7 +98,7 @@ class SemanticMediaIndex(context: Context) {
         }
     }
 
-    private fun cosine(a: FloatArray, b: FloatArray): Double {
+    fun cosine(a: FloatArray, b: FloatArray): Double {
         if (a.size != b.size) return 0.0
         var dot = 0.0
         var aa = 0.0

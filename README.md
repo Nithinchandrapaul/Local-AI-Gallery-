@@ -1,27 +1,24 @@
-# Local Photo AI
+# Sunny Local AI Gallery (V3.0.0)
 
-A privacy-first Android photo search and cleanup app.
+A 100% on-device, privacy-first Android photo and video search, intelligent album clustering, and cleanup gallery.
 
-## What it does
+> **Your photos stay on your device. AI understands and cleans your gallery locally.**
 
-- Semantic natural-language photo search using MediaPipe Universal Embedder + EmbeddingGemma 2.
-- Exact duplicate detection using SHA-256.
-- Visual similarity detection using dHash.
-- Screenshot detection.
-- WhatsApp-origin detection.
-- Large-file detection.
-- Review-before-delete workflow.
-- Android protected deletion confirmation through MediaStore.createDeleteRequest().
-- AI model is bundled into the APK and photo processing stays on-device. No model download is required after installation.\n\n## V1.2 Smart Cleanup\n- Explainable keeper recommendation for exact duplicate groups.\n- Reviewable recommended deletion set.\n- Incremental AI indexing and compact 256-dimensional stored embeddings.
+## Features
 
-## Build
+- **Semantic Natural Language Search**: Search photos and media locally using Google EmbeddingGemma 2 (Text + Vision 440M LiteRT-LM) and MediaPipe Universal Embedder.
+- **Smart Event & Album Clustering Engine (V3.0)**: Automatically organizes your photos into event and story albums using temporal proximity sliding windows and 256d compact vector cosine similarity without any cloud processing.
+- **Multi-Modal & Multi-Attribute Search (V3.0)**: Filter queries by media types (Photos/Videos), temporal windows (Past 30 days, 1 year, All time), and visual quality thresholds.
+- **Video Intelligence & Multi-Format Timeline (V2.5)**: MediaStore video scanning, video playback indicators, duration badges, and large video (>50MB) clutter triage.
+- **Local Gallery AI Assistant (V2.0)**: Conversational on-device assistant with natural language queries, storage explanations, and interactive candidate review.
+- **Visual Quality Intelligence (V1.5)**: 4-factor quality evaluation (sharpness via Laplacian variance, exposure, compression artifacts, and resolution) with burst sequence grouping and best-shot keeper ranking.
+- **WhatsApp Clutter Intelligence (V1.4)**: Sent vs. received classification, heuristic forwarded confidence scoring, and chat duplicate analysis.
+- **Exact Duplicates & Storage Recovery**: SHA-256 cryptographic duplicate detection with explainable keeper retention and recoverable storage estimation.
+- **Protected MediaStore Deletion**: Strictly uses Android's native `MediaStore.createDeleteRequest()` flow. Never silently deletes user photos.
+- **Zero Cloud AI Dependency**: The 440M EmbeddingGemma 2 LiteRT-LM model is bundled directly inside the APK assets. Zero network downloads required.
 
-This project is intentionally arranged at repository root so you can drag-and-drop all files directly into a GitHub repository.
+## Target Platform & Requirements
+- **JDK**: 21
+- **Android SDK**: Compile SDK 36, Min SDK 31 (Android 12+)
+- **ABIs**: 64-bit `arm64-v8a` and `x86_64`
 
-GitHub Actions:
-1. Open Actions.
-2. Select `Build Local Photo AI APK`.
-3. Run workflow.
-4. Download `LocalPhotoAI-debug-apk` from the successful run.
-
-Minimum Android version: Android 12 / API 31.

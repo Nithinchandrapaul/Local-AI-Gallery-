@@ -33,6 +33,7 @@ fun AssistantScreen(
     analyzer: PhotoAnalyzer,
     embedder: EmbeddingEngine,
     index: SemanticMediaIndex,
+    clusterEngine: AlbumClusterEngine? = null,
     onDelete: (List<MediaItem>) -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -43,7 +44,7 @@ fun AssistantScreen(
         ChatMessage(
             isUser = false,
             text = "Hi! I am your 100% on-device AI Gallery Assistant.\n\n" +
-                   "I can understand your photos locally, calculate recoverable storage, find duplicates, and inspect WhatsApp media without uploading your photos to any cloud.",
+                   "I can understand your photos locally, cluster them into smart albums, calculate recoverable storage, find duplicates, and inspect media without uploading anything to the cloud.",
             action = "Welcome"
         )
     }
@@ -51,9 +52,12 @@ fun AssistantScreen(
     val messages = remember { mutableStateListOf(initialMessage) }
 
     val suggestions = listOf(
+        "Show smart albums",
         "How much storage can I recover?",
         "Find exact duplicates",
         "Clean up clutter",
+        "Show all videos",
+        "Find large videos >50MB",
         "Inspect WhatsApp media",
         "Find blurry photos",
         "Show screenshots",
@@ -76,7 +80,8 @@ fun AssistantScreen(
                 existingReport = report,
                 analyzer = analyzer,
                 embedder = embedder,
-                index = index
+                index = index,
+                clusterEngine = clusterEngine
             )
             messages.add(
                 ChatMessage(
@@ -246,6 +251,19 @@ private fun ChatBubble(
                                     },
                                     modifier = Modifier.align(Alignment.TopEnd).padding(1.dp)
                                 )
+                                if (item.isVideo) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                        shape = MaterialTheme.shapes.extraSmall,
+                                        modifier = Modifier.align(Alignment.BottomEnd).padding(2.dp)
+                                    ) {
+                                        Text(
+                                            text = "▶ ${item.durationFormatted.ifEmpty { "Video" }}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

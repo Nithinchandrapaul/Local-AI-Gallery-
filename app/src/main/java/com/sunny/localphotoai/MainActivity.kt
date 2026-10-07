@@ -73,6 +73,10 @@ fun LocalPhotoAIApp() {
     val embedder = remember { EmbeddingEngine(context.applicationContext) }
     val index = remember { SemanticMediaIndex(context.applicationContext) }
     val analyzer = remember { PhotoAnalyzer(context.applicationContext) }
+    val clusterEngine = remember { AlbumClusterEngine(index) }
+
+    var clusters by remember { mutableStateOf<List<MediaCluster>>(emptyList()) }
+    var selectedCluster by remember { mutableStateOf<MediaCluster?>(null) }
 
     DisposableEffect(Unit) { onDispose { embedder.close() } }
 
@@ -129,8 +133,9 @@ fun LocalPhotoAIApp() {
             bottomBar = {
                 NavigationBar {
                     NavigationBarItem(tab == 0, { tab = 0 }, label = { Text("Search") }, icon = {})
-                    NavigationBarItem(tab == 1, { tab = 1 }, label = { Text("Cleanup") }, icon = {})
-                    NavigationBarItem(tab == 2, { tab = 2 }, label = { Text("Assistant") }, icon = {})
+                    NavigationBarItem(tab == 1, { tab = 1 }, label = { Text("Albums") }, icon = {})
+                    NavigationBarItem(tab == 2, { tab = 2 }, label = { Text("Cleanup") }, icon = {})
+                    NavigationBarItem(tab == 3, { tab = 3 }, label = { Text("Assistant") }, icon = {})
                 }
             }
         ) { padding ->
@@ -166,6 +171,23 @@ fun LocalPhotoAIApp() {
                         }
                     )
                 } else if (tab == 1) {
+                    AlbumsScreen(
+                        items = items,
+                        clusters = clusters,
+                        selectedCluster = selectedCluster,
+                        onSelectCluster = { selectedCluster = it },
+                        busy = busy,
+                        onCluster = {
+                            scope.launch {
+                                busy = true
+                                status = "Clustering albums using temporal and visual AI..."
+                                clusters = clusterEngine.clusterMedia(items)
+                                status = "Generated ${clusters.size} smart albums"
+                                busy = false
+                            }
+                        }
+                    )
+                } else if (tab == 2) {
                     CleanupScreen(
                         items = items,
                         report = report,
@@ -195,6 +217,7 @@ fun LocalPhotoAIApp() {
                         analyzer = analyzer,
                         embedder = embedder,
                         index = index,
+                        clusterEngine = clusterEngine,
                         onDelete = { selected ->
                             if (selected.isNotEmpty()) {
                                 val uris = selected.map { it.uri }
@@ -288,15 +311,28 @@ private fun SearchScreen(
     onRescan: () -> Unit
 ) {
     var mediaFilter by remember { mutableStateOf("All") }
+    var timeFilter by remember { mutableStateOf("All") }
+    var highQualityOnly by remember { mutableStateOf(false) }
+
     val photosCount = remember(items) { items.count { !it.isVideo } }
     val videosCount = remember(items) { items.count { it.isVideo } }
 
-    val displayedItems = remember(items, results, query, mediaFilter) {
+    val displayedItems = remember(items, results, query, mediaFilter, timeFilter, highQualityOnly) {
         val base = if (results.isNotEmpty() || query.isNotBlank()) results else items
-        when (mediaFilter) {
-            "Photos" -> base.filter { !it.isVideo }
-            "Videos" -> base.filter { it.isVideo }
-            else -> base
+        val nowSec = System.currentTimeMillis() / 1000L
+        base.filter { item ->
+            val matchMedia = when (mediaFilter) {
+                "Photos" -> !item.isVideo
+                "Videos" -> item.isVideo
+                else -> true
+            }
+            val matchTime = when (timeFilter) {
+                "30 Days" -> (nowSec - item.dateAdded) <= 30L * 86400L
+                "1 Year" -> (nowSec - item.dateAdded) <= 365L * 86400L
+                else -> true
+            }
+            val matchQuality = if (highQualityOnly) item.qualityScore >= 60 else true
+            matchMedia && matchTime && matchQuality
         }
     }
 
@@ -364,12 +400,152 @@ private fun SearchScreen(
                 label = { Text("Videos ($videosCount)") }
             )
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = timeFilter == "All",
+                onClick = { timeFilter = "All" },
+                label = { Text("All Time") }
+            )
+            FilterChip(
+                selected = timeFilter == "30 Days",
+                onClick = { timeFilter = "30 Days" },
+                label = { Text("Past 30d") }
+            )
+            FilterChip(
+                selected = timeFilter == "1 Year",
+                onClick = { timeFilter = "1 Year" },
+                label = { Text("Past 1y") }
+            )
+            FilterChip(
+                selected = highQualityOnly,
+                onClick = { highQualityOnly = !highQualityOnly },
+                label = { Text("★ High Quality") }
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(enabled = query.isNotBlank() && !busy, onClick = onSearch) { Text("Search") }
             OutlinedButton(enabled = !busy, onClick = onRescan) { Text("Rescan") }
         }
         Text(status, style = MaterialTheme.typography.bodySmall)
         PhotoGrid(displayedItems)
+    }
+}
+
+@Composable
+private fun AlbumsScreen(
+    items: List<MediaItem>,
+    clusters: List<MediaCluster>,
+    selectedCluster: MediaCluster?,
+    onSelectCluster: (MediaCluster?) -> Unit,
+    busy: Boolean,
+    onCluster: () -> Unit
+) {
+    if (selectedCluster != null) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(onClick = { onSelectCluster(null) }) {
+                    Text("← All Albums")
+                }
+                Text(
+                    "${selectedCluster.items.size} items • ${"%.1f".format(selectedCluster.totalSizeMb)} MB",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Text(selectedCluster.title, style = MaterialTheme.typography.titleLarge)
+            Text(
+                "${selectedCluster.category} • ${selectedCluster.dateRangeFormatted}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            PhotoGrid(selectedCluster.items)
+        }
+    } else {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "AI Smart Albums",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Button(enabled = !busy && items.isNotEmpty(), onClick = onCluster) {
+                    Text(if (clusters.isEmpty()) "Build Smart Albums" else "Re-Cluster")
+                }
+            }
+            if (clusters.isEmpty()) {
+                Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        "No albums generated yet. Tap 'Build Smart Albums' to cluster your photos using on-device temporal proximity and visual AI.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(150.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(clusters, key = { it.id }) { cluster ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelectCluster(cluster) },
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        ) {
+                            Column {
+                                Box(modifier = Modifier.aspectRatio(1.2f).fillMaxWidth()) {
+                                    AsyncImage(
+                                        model = cluster.coverItem.uri,
+                                        contentDescription = cluster.title,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                        shape = MaterialTheme.shapes.extraSmall,
+                                        modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "${cluster.items.size} items",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Column(Modifier.padding(8.dp)) {
+                                    Text(
+                                        text = cluster.title,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = cluster.category,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = cluster.dateRangeFormatted,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
