@@ -10,14 +10,19 @@ import com.google.mediapipe.tasks.retrieval.universalembedder.UniversalEmbedder
 import com.google.mediapipe.tasks.retrieval.universalembedder.UniversalEmbedderOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.sqrt
 
 class EmbeddingEngine(private val context: Context) {
+    companion object {
+        const val STORAGE_DIMENSION = 256
+    }
+
     private var embedder: UniversalEmbedder? = null
 
     suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
         if (embedder != null) return@withContext true
-        val model = ModelDownloader.ensureModel(context) ?: return@withContext false
         runCatching {
+            val model = ModelDownloader.modelFile(context)
             val options = UniversalEmbedderOptions.builder()
                 .setBaseOptions(BaseOptions.builder().setModelAssetPath(model.absolutePath).build())
                 .setL2Normalize(true)
@@ -29,7 +34,7 @@ class EmbeddingEngine(private val context: Context) {
 
     suspend fun embedText(text: String): FloatArray? = withContext(Dispatchers.Default) {
         runCatching {
-            embedder?.embedText(text)?.embeddings()?.firstOrNull()?.floatEmbedding()
+            embedder?.embedText(text)?.embeddings()?.firstOrNull()?.floatEmbedding()?.let(::compact)
         }.getOrNull()
     }
 
@@ -42,13 +47,23 @@ class EmbeddingEngine(private val context: Context) {
             val mp = BitmapImageBuilder(resized).build()
             val result = embedder?.embedImage(mp)
             resized.recycle()
-            result?.embeddings()?.firstOrNull()?.floatEmbedding()
+            result?.embeddings()?.firstOrNull()?.floatEmbedding()?.let(::compact)
         }.getOrNull()
     }
 
     fun close() {
         embedder?.close()
         embedder = null
+    }
+
+    private fun compact(full: FloatArray): FloatArray {
+        if (full.size <= STORAGE_DIMENSION) return full
+        val out = full.copyOf(STORAGE_DIMENSION)
+        var norm = 0.0
+        for (v in out) norm += v * v
+        val scale = if (norm > 0.0) 1.0 / sqrt(norm) else 1.0
+        for (i in out.indices) out[i] = (out[i] * scale).toFloat()
+        return out
     }
 
     private fun resize(src: Bitmap, max: Int): Bitmap {
