@@ -53,7 +53,15 @@ jobs:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
       - name: Build release APK and App Bundle
-        run: gradle --no-daemon --stacktrace assembleRelease bundleRelease
+        run: gradle --no-daemon --stacktrace assembleDebug assembleRelease bundleRelease
+
+      - name: Verify installable debug APK
+        run: |
+          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+          echo "Installable debug APK: $APK"
+          ls -lh "$APK"
 
       - name: Verify bundled model is inside APK
         run: |
@@ -74,6 +82,14 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14
+      - name: Upload unsigned release APK for Play/signing pipeline
+        uses: actions/upload-artifact@v4
+        with:
+          name: SunnyLocalAIGallery-release-apk-unsigned
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload App Bundle
         uses: actions/upload-artifact@v4
         with:
