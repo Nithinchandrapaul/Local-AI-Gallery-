@@ -40,10 +40,40 @@ class CleanupEngine(private val context: Context) {
         hash
     }.getOrNull()
 
+    /** Fast blur score using variance of the 3x3 Laplacian on a 96px grayscale image. */
+    fun blurScore(uri: Uri): Double? = runCatching {
+        val bitmap = context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(BufferedInputStream(it))
+        } ?: return null
+        val small = Bitmap.createScaledBitmap(bitmap, 96, 96, true)
+        if (small !== bitmap) bitmap.recycle()
+        val gray = IntArray(96 * 96)
+        for (y in 0 until 96) for (x in 0 until 96) gray[y * 96 + x] = luminance(small.getPixel(x, y))
+        small.recycle()
+        var sum = 0.0
+        var sumSq = 0.0
+        var count = 0
+        for (y in 1 until 95) {
+            for (x in 1 until 95) {
+                val i = y * 96 + x
+                val lap = abs(
+                    -gray[i - 96] - gray[i - 1] + 4 * gray[i] -
+                    gray[i + 1] - gray[i + 96]
+                ).toDouble()
+                sum += lap
+                sumSq += lap * lap
+                count++
+            }
+        }
+        if (count == 0) return null
+        val mean = sum / count
+        (sumSq / count) - mean * mean
+    }.getOrNull()
+
+    fun hamming(a: Long, b: Long): Int = java.lang.Long.bitCount(a xor b)
+
     private fun luminance(pixel: Int): Int =
         ((pixel shr 16 and 0xff) * 299 +
          (pixel shr 8 and 0xff) * 587 +
          (pixel and 0xff) * 114) / 1000
-
-    fun hamming(a: Long, b: Long): Int = java.lang.Long.bitCount(a xor b)
 }
