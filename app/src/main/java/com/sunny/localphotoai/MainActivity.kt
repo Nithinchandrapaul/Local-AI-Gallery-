@@ -3,6 +3,8 @@ package com.sunny.localphotoai
 import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
 import androidx.activity.ComponentActivity
@@ -21,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
@@ -38,6 +41,7 @@ class MainActivity : ComponentActivity() {
 fun LocalPhotoAIApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var showWelcome by remember { mutableStateOf(true) }
     var permission by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED)
     }
@@ -66,10 +70,11 @@ fun LocalPhotoAIApp() {
     }
 
     MaterialTheme {
+        Box(Modifier.fillMaxSize()) {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Local Photo AI") },
+                    title = { Text("Sunny Local AI Gallery") },
                     actions = {
                         TextButton(enabled = !busy && permission, onClick = {
                             scope.launch {
@@ -160,6 +165,62 @@ fun LocalPhotoAIApp() {
                     )
                 }
             }
+        }
+        if (showWelcome) {
+            WelcomeScreen(
+                onContinue = { showWelcome = false },
+                onFeedback = {
+                    val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).apply {
+                        putExtra(Intent.EXTRA_SUBJECT, "Sunny Local AI Gallery Feedback")
+                        putExtra(Intent.EXTRA_TEXT, "Hi Sunny Local AI Gallery team,\n\nMy feedback:\n")
+                    }
+                    runCatching { context.startActivity(intent) }
+                }
+            )
+        }
+        }
+    }
+}
+
+@Composable
+private fun WelcomeScreen(
+    onContinue: () -> Unit,
+    onFeedback: () -> Unit
+) {
+    Surface(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 36.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Image(
+                painter = painterResource(R.drawable.sunny_ai_gallery_icon),
+                contentDescription = "Sunny Local AI Gallery",
+                modifier = Modifier.size(180.dp),
+                contentScale = ContentScale.Fit
+            )
+            Spacer(Modifier.height(28.dp))
+            Text("Hi Folks!", style = MaterialTheme.typography.headlineMedium)
+            Spacer(Modifier.height(8.dp))
+            Text("Welcome to Sunny Local AI Gallery", style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Your photos stay on your device. Search, understand and clean your gallery with on-device AI.",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Spacer(Modifier.height(28.dp))
+            Button(onClick = onContinue, modifier = Modifier.fillMaxWidth()) {
+                Text("Enter Gallery")
+            }
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(onClick = onFeedback, modifier = Modifier.fillMaxWidth()) {
+                Text("Send Feedback")
+            }
+            Spacer(Modifier.height(18.dp))
+            Text(
+                "We'd love to hear what you think. Your feedback helps us make the gallery better.",
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }
