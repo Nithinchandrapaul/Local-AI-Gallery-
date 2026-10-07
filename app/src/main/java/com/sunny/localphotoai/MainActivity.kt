@@ -114,6 +114,7 @@ fun LocalPhotoAIApp() {
                 NavigationBar {
                     NavigationBarItem(tab == 0, { tab = 0 }, label = { Text("Search") }, icon = {})
                     NavigationBarItem(tab == 1, { tab = 1 }, label = { Text("Cleanup") }, icon = {})
+                    NavigationBarItem(tab == 2, { tab = 2 }, label = { Text("Assistant") }, icon = {})
                 }
             }
         ) { padding ->
@@ -141,7 +142,7 @@ fun LocalPhotoAIApp() {
                             status = "${items.size} photos found"
                         }
                     )
-                } else {
+                } else if (tab == 1) {
                     CleanupScreen(
                         items = items,
                         report = report,
@@ -156,6 +157,21 @@ fun LocalPhotoAIApp() {
                                 busy = false
                             }
                         },
+                        onDelete = { selected ->
+                            if (selected.isNotEmpty()) {
+                                val uris = selected.map { it.uri }
+                                val intentSender = MediaStore.createDeleteRequest(context.contentResolver, uris).intentSender
+                                (context as Activity).startIntentSenderForResult(intentSender, 901, null, 0, 0, 0)
+                            }
+                        }
+                    )
+                } else {
+                    AssistantScreen(
+                        items = items,
+                        report = report,
+                        analyzer = analyzer,
+                        embedder = embedder,
+                        index = index,
                         onDelete = { selected ->
                             if (selected.isNotEmpty()) {
                                 val uris = selected.map { it.uri }

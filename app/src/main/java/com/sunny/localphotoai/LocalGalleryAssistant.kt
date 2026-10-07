@@ -16,6 +16,33 @@ object LocalGalleryAssistant {
         if (q.isBlank()) return AssistantOutcome(AssistantResult("Tell me what you want to find or clean."))
         val lower = q.lowercase()
         return when {
+            lower in listOf("hi", "hello", "hey", "help", "what can you do?", "what can you do") -> {
+                AssistantOutcome(AssistantResult(
+                    "Hello! I am your 100% on-device AI gallery assistant. You can ask me to:\n" +
+                    "• Find specific photos ('receipts', 'family trip', 'car photos')\n" +
+                    "• Inspect recoverable storage ('how much space can I recover?')\n" +
+                    "• Detect exact duplicates and review deletion candidates\n" +
+                    "• Analyze WhatsApp clutter and forwarded images\n" +
+                    "• Identify blurry or low-quality photos\n" +
+                    "• Show all screenshots or large files (>10MB)",
+                    "Capabilities overview"
+                ))
+            }
+            lower.contains("screenshot") -> {
+                val shots = items.filter { it.isScreenshot }
+                AssistantOutcome(
+                    AssistantResult("Found ${shots.size} screenshots across your device. You can review them for cleanup.", "Filter screenshots"),
+                    shots
+                )
+            }
+            lower.contains("large") || lower.contains("big file") || lower.contains("10mb") -> {
+                val largeFiles = items.filter { it.size > 10 * 1024 * 1024 }
+                val totalMb = largeFiles.sumOf { it.size } / 1024.0 / 1024.0
+                AssistantOutcome(
+                    AssistantResult("Found ${largeFiles.size} large photos occupying %.1f MB total (>10MB each).".format(totalMb), "Inspect large photos"),
+                    largeFiles
+                )
+            }
             lower.contains("storage") || lower.contains("recover") || lower.contains("space") -> {
                 val report = existingReport ?: analyzer.analyze(items)
                 val duplicateMb = report.totalRecoverableBytes / 1024.0 / 1024.0
