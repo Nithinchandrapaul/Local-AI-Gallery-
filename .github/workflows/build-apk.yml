@@ -75,13 +75,14 @@ jobs:
           test -s "$BUNDLE"
           ls -lh "$BUNDLE"
 
-      - name: Upload APK
+      - name: Upload installable debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: SunnyLocalAIGallery-release-apk
-          path: app/build/outputs/apk/release/*.apk
+          name: SunnyLocalAIGallery-v1.3-installable-apk
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
       - name: Upload unsigned release APK for Play/signing pipeline
         uses: actions/upload-artifact@v4
         with:
