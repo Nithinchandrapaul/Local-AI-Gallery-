@@ -5,7 +5,9 @@
 
     <application
         android:allowBackup="true"
-        android:label="Local Photo AI"
+        android:label="Sunny Local AI Gallery"
+        android:icon="@drawable/sunny_ai_gallery_icon"
+        android:roundIcon="@drawable/sunny_ai_gallery_icon"
         android:supportsRtl="true"
         android:theme="@style/Theme.LocalPhotoAI">
         <activity
