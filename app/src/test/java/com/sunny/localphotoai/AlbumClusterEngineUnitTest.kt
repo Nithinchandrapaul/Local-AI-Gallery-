@@ -12,9 +12,10 @@ import kotlin.math.abs
 class AlbumClusterEngineUnitTest {
 
     private fun createMediaItem(id: Long, dateAddedSeconds: Long, sizeBytes: Long = 1024L): MediaItem {
+        val mockUri = io.mockk.mockk<Uri>(relaxed = true)
         return MediaItem(
             id = id,
-            uri = Uri.parse("content://media/external/images/media/$id"),
+            uri = mockUri,
             name = "IMG_$id.jpg",
             path = "/storage/emulated/0/DCIM/Camera/IMG_$id.jpg",
             dateAdded = dateAddedSeconds,
