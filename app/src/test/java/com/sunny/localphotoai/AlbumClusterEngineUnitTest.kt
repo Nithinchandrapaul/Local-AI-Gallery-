@@ -21,7 +21,7 @@ class AlbumClusterEngineUnitTest {
             size = sizeBytes,
             mimeType = "image/jpeg",
             isVideo = false,
-            duration = 0L,
+            durationMs = 0L,
             width = 1920,
             height = 1080
         )
