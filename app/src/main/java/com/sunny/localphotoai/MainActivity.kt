@@ -958,6 +958,7 @@ private fun PhotoGrid(items: List<MediaItem>) {
                             style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                         )
+                    }
                 }
             }
         }
