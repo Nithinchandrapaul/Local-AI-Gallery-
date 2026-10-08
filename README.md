@@ -1,4 +1,4 @@
-# Sunny Local AI Gallery (V3.0.0)
+# Leo Ai local gallery (V3.0.1)
 
 A 100% on-device, privacy-first Android photo and video search, intelligent album clustering, and cleanup gallery.
 
@@ -6,6 +6,7 @@ A 100% on-device, privacy-first Android photo and video search, intelligent albu
 
 ## Features
 
+- **Icon & Identity (V3.0.1)**: Brand logo and application icon updated to the official golden lion neural aperture emblem. App size optimized to sub-350MB packaging.
 - **Semantic Natural Language Search**: Search photos and media locally using Google EmbeddingGemma 2 (Text + Vision 440M LiteRT-LM) and MediaPipe Universal Embedder.
 - **Smart Event & Album Clustering Engine (V3.0)**: Automatically organizes your photos into event and story albums using temporal proximity sliding windows and 256d compact vector cosine similarity without any cloud processing.
 - **Multi-Modal & Multi-Attribute Search (V3.0)**: Filter queries by media types (Photos/Videos), temporal windows (Past 30 days, 1 year, All time), and visual quality thresholds.

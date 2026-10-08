@@ -94,7 +94,7 @@ fun LocalPhotoAIApp() {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Sunny Local AI Gallery") },
+                    title = { Text("Leo Ai local gallery") },
                     actions = {
                         TextButton(enabled = !busy && permission, onClick = {
                             scope.launch {
@@ -234,8 +234,8 @@ fun LocalPhotoAIApp() {
                 onContinue = { showWelcome = false },
                 onFeedback = {
                     val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).apply {
-                        putExtra(Intent.EXTRA_SUBJECT, "Sunny Local AI Gallery Feedback")
-                        putExtra(Intent.EXTRA_TEXT, "Hi Sunny Local AI Gallery team,\n\nMy feedback:\n")
+                        putExtra(Intent.EXTRA_SUBJECT, "Leo Ai local gallery Feedback")
+                        putExtra(Intent.EXTRA_TEXT, "Hi Leo Ai local gallery team,\n\nMy feedback:\n")
                     }
                     runCatching { context.startActivity(intent) }
                 }
@@ -257,15 +257,15 @@ private fun WelcomeScreen(
             verticalArrangement = Arrangement.Center
         ) {
             Image(
-                painter = painterResource(R.drawable.sunny_ai_gallery_icon),
-                contentDescription = "Sunny Local AI Gallery",
+                painter = painterResource(R.drawable.leo_ai_gallery_icon),
+                contentDescription = "Leo Ai local gallery",
                 modifier = Modifier.size(180.dp),
                 contentScale = ContentScale.Fit
             )
             Spacer(Modifier.height(28.dp))
             Text("Hi Folks!", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(8.dp))
-            Text("Welcome to Sunny Local AI Gallery", style = MaterialTheme.typography.headlineSmall)
+            Text("Welcome to Leo Ai local gallery", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(16.dp))
             Text(
                 "Your photos stay on your device. Search, understand and clean your gallery with on-device AI.",
@@ -293,7 +293,7 @@ private fun PermissionCard(onGrant: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Photo access required", style = MaterialTheme.typography.titleLarge)
-            Text("Local Photo AI needs access to your photos so it can search and clean them on this device.")
+            Text("Leo Ai local gallery needs access to your photos so it can search and clean them on this device.")
             Button(onClick = onGrant) { Text("Allow photos") }
         }
     }

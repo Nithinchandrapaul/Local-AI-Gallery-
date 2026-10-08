@@ -76,37 +76,48 @@ jobs:
           test -s "$BUNDLE"
           ls -lh "$BUNDLE"
 
+      - name: Stage branded release artifacts
+        run: |
+          mkdir -p dist
+          DEBUG_APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          RELEASE_APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          RELEASE_AAB=$(find app/build/outputs/bundle/release -name '*.aab' | head -1)
+          cp "$DEBUG_APK" "dist/LeoAiLocalGallery-v3.0.1-installable.apk"
+          cp "$RELEASE_APK" "dist/LeoAiLocalGallery-v3.0.1-release-unsigned.apk"
+          cp "$RELEASE_AAB" "dist/LeoAiLocalGallery-v3.0.1-release.aab"
+          ls -lh dist/
+
       - name: Upload installable debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: SunnyLocalAIGallery-installable-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: LeoAiLocalGallery-installable-apk
+          path: dist/LeoAiLocalGallery-v3.0.1-installable.apk
           if-no-files-found: error
           retention-days: 14
 
       - name: Upload unsigned release APK for Play/signing pipeline
         uses: actions/upload-artifact@v4
         with:
-          name: SunnyLocalAIGallery-release-apk-unsigned
-          path: app/build/outputs/apk/release/*.apk
+          name: LeoAiLocalGallery-release-apk-unsigned
+          path: dist/LeoAiLocalGallery-v3.0.1-release-unsigned.apk
           if-no-files-found: error
           retention-days: 14
 
       - name: Upload App Bundle
         uses: actions/upload-artifact@v4
         with:
-          name: SunnyLocalAIGallery-release-aab
-          path: app/build/outputs/bundle/release/*.aab
+          name: LeoAiLocalGallery-release-aab
+          path: dist/LeoAiLocalGallery-v3.0.1-release.aab
           if-no-files-found: error
           retention-days: 14
 
-      - name: Rename and publish GitHub Release
+      - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/release/*.apk
-            app/build/outputs/bundle/release/*.aab
+            dist/LeoAiLocalGallery-v3.0.1-installable.apk
+            dist/LeoAiLocalGallery-v3.0.1-release-unsigned.apk
+            dist/LeoAiLocalGallery-v3.0.1-release.aab
           generate_release_notes: true
 
