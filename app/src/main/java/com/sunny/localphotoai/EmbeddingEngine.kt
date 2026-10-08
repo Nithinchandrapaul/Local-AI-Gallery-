@@ -41,7 +41,7 @@ class EmbeddingEngine(private val context: Context) {
             Log.w(TAG, "Notice: System.loadLibrary('litertlm_jni'): ${t.message}")
         }
 
-        // 1. Try Hardware-Accelerated GPU Delegate (Vulkan/OpenCL) via Asset
+        // 1. Hardware-Accelerated GPU Delegate via Asset (Vulkan/OpenCL)
         try {
             val options = UniversalEmbedderOptions.builder()
                 .setBaseOptions(
@@ -50,17 +50,46 @@ class EmbeddingEngine(private val context: Context) {
                         .setDelegate(Delegate.GPU)
                         .build()
                 )
+                .setTextDelegate(Delegate.GPU)
+                .setVisionDelegate(Delegate.GPU)
                 .setL2Normalize(true)
                 .build()
             embedder = UniversalEmbedder.createFromOptions(context, options)
             isGpuAccelerated = true
-            Log.i(TAG, "Loaded model successfully with GPU acceleration from asset: $MODEL_ASSET_PATH")
+            Log.i(TAG, "🚀 UniversalEmbedder successfully initialized with GPU acceleration (Text+Vision) from asset: $MODEL_ASSET_PATH")
             return@withContext true
-        } catch (eGpu: Throwable) {
-            Log.w(TAG, "GPU asset initialization fallback to CPU: ${eGpu.message}")
+        } catch (eGpuAsset: Throwable) {
+            Log.w(TAG, "GPU asset initialization failed (${eGpuAsset.message}), attempting extracted file descriptor...")
         }
 
-        // 2. Try High-Performance CPU Delegate via Asset
+        // 2. Hardware-Accelerated GPU Delegate via Extracted File Descriptor (direct page-aligned mmap)
+        try {
+            val file = ModelDownloader.modelFile(context)
+            if (file.exists() && file.length() > 0) {
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                    val options = UniversalEmbedderOptions.builder()
+                        .setBaseOptions(
+                            BaseOptions.builder()
+                                .setModelAssetFileDescriptor(pfd.fd)
+                                .setDelegate(Delegate.GPU)
+                                .build()
+                        )
+                        .setTextDelegate(Delegate.GPU)
+                        .setVisionDelegate(Delegate.GPU)
+                        .setL2Normalize(true)
+                        .build()
+                    embedder = UniversalEmbedder.createFromOptions(context, options)
+                    isGpuAccelerated = true
+                    Log.i(TAG, "🚀 UniversalEmbedder successfully initialized with GPU acceleration from file descriptor: ${file.absolutePath}")
+                    lastError = null
+                    return@withContext true
+                }
+            }
+        } catch (eGpuFile: Throwable) {
+            Log.w(TAG, "GPU file descriptor initialization failed: ${eGpuFile.message}, attempting CPU fallback...")
+        }
+
+        // 3. Fallback: Multi-core CPU Delegate via Asset
         try {
             val options = UniversalEmbedderOptions.builder()
                 .setBaseOptions(
@@ -69,23 +98,24 @@ class EmbeddingEngine(private val context: Context) {
                         .setDelegate(Delegate.CPU)
                         .build()
                 )
+                .setTextDelegate(Delegate.CPU)
+                .setVisionDelegate(Delegate.CPU)
                 .setL2Normalize(true)
                 .build()
             embedder = UniversalEmbedder.createFromOptions(context, options)
             isGpuAccelerated = false
-            Log.i(TAG, "Loaded model successfully with CPU from asset: $MODEL_ASSET_PATH")
+            Log.i(TAG, "Loaded UniversalEmbedder with CPU from asset: $MODEL_ASSET_PATH")
             return@withContext true
-        } catch (eCpu: Throwable) {
-            Log.w(TAG, "Direct asset load failed: ${eCpu.message}, trying FileDescriptor fallback...", eCpu)
-            lastError = eCpu.message ?: eCpu.javaClass.simpleName
+        } catch (eCpuAsset: Throwable) {
+            Log.w(TAG, "Direct asset CPU load failed: ${eCpuAsset.message}")
+            lastError = eCpuAsset.message ?: eCpuAsset.javaClass.simpleName
         }
 
-        // 3. Fallback: Load via extracted internal file descriptor (GPU then CPU)
+        // 4. Fallback: CPU via extracted file descriptor
         try {
             val file = ModelDownloader.modelFile(context)
             if (file.exists() && file.length() > 0) {
                 ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
-                    // Attempt CPU on extracted file
                     val options = UniversalEmbedderOptions.builder()
                         .setBaseOptions(
                             BaseOptions.builder()
@@ -93,18 +123,20 @@ class EmbeddingEngine(private val context: Context) {
                                 .setDelegate(Delegate.CPU)
                                 .build()
                         )
+                        .setTextDelegate(Delegate.CPU)
+                        .setVisionDelegate(Delegate.CPU)
                         .setL2Normalize(true)
                         .build()
                     embedder = UniversalEmbedder.createFromOptions(context, options)
                     isGpuAccelerated = false
-                    Log.i(TAG, "Loaded model successfully from file descriptor: ${file.absolutePath}")
+                    Log.i(TAG, "Loaded UniversalEmbedder with CPU from file descriptor: ${file.absolutePath}")
                     lastError = null
                     return@withContext true
                 }
             }
-        } catch (e2: Throwable) {
-            Log.e(TAG, "Fallback file descriptor load failed: ${e2.message}", e2)
-            lastError = "Asset error: ${lastError ?: "unknown"} | File error: ${e2.message ?: e2.javaClass.simpleName}"
+        } catch (eCpuFile: Throwable) {
+            Log.e(TAG, "All UniversalEmbedder initialization strategies failed: ${eCpuFile.message}", eCpuFile)
+            lastError = "Asset error: ${lastError ?: "unknown"} | File error: ${eCpuFile.message ?: eCpuFile.javaClass.simpleName}"
         }
 
         false

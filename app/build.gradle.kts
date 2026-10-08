@@ -12,8 +12,8 @@ android {
         applicationId = "com.sunny.localphotoai"
         minSdk = 31
         targetSdk = 36
-        versionCode = 19
-        versionName = "3.3.2"
+        versionCode = 20
+        versionName = "3.3.3"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -43,6 +43,10 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    androidResources {
+        noCompress += listOf("litertlm", "tflite", "bin")
     }
 
     packaging {

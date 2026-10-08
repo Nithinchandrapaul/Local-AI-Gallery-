@@ -417,12 +417,19 @@ fun LocalPhotoAIApp() {
                                 shape = MaterialTheme.shapes.small,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    "✨ Currently indexed: $liveCount of $totalPhotos photos",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(8.dp)
-                                )
+                                Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        "✨ Currently indexed: $liveCount of $totalPhotos photos",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Text(
+                                        if (embedder.isGpuAccelerated) "🚀 Hardware Engine: GPU Accelerated" else "⚙️ Engine: Multi-core CPU",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                    )
+                                }
                             }
                             Button(
                                 onClick = {
