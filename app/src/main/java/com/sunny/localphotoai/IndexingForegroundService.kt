@@ -137,12 +137,14 @@ class IndexingForegroundService : Service() {
                 return@launch
             }
 
-            // Bounded prefetch pipeline channel (capacity = 8)
-            val prefetchChannel = Channel<Pair<MediaItem, Bitmap>?>(capacity = 8)
+            // Adaptive concurrency tuned for budget chipsets (2-4 efficient cores) to flagship multi-cores
+            val availableCores = Runtime.getRuntime().availableProcessors()
+            val workerCount = minOf(4, maxOf(2, availableCores / 2))
+            val prefetchCapacity = workerCount * 3
+            val prefetchChannel = Channel<Pair<MediaItem, Bitmap>?>(capacity = prefetchCapacity)
 
-            // Stage 1: Dual-worker I/O Prefetch & Fast Decode Pipeline (Dispatchers.IO)
+            // Stage 1: Adaptive Prefetch & Fast Decode Pipeline (Dispatchers.IO)
             val prefetchJob = launch(Dispatchers.IO) {
-                val workerCount = 2
                 val itemQueue = Channel<MediaItem>(capacity = Channel.UNLIMITED)
                 for (item in pendingItems) {
                     itemQueue.send(item)
@@ -169,6 +171,7 @@ class IndexingForegroundService : Service() {
             // Stage 2: High-Performance Neural Inference & Real-Time Dispatch (Dispatchers.Default)
             val batch = mutableListOf<Pair<MediaItem, FloatArray>>()
             var processedCount = 0
+            var lastNotifTime = 0L
 
             for (entry in prefetchChannel) {
                 if (isStopRequested) {
@@ -189,8 +192,8 @@ class IndexingForegroundService : Service() {
                     }
                 }
 
-                // Write-ahead flush every 5 items or at the end to keep SQLite updated
-                if (batch.size >= 5 || processedCount == pendingTotal) {
+                // Write-ahead flush every 10 items or at end: reduces SQLite transaction overhead by 50%
+                if (batch.size >= 10 || processedCount == pendingTotal) {
                     index.putBatch(batch)
                     batch.clear()
                 }
@@ -202,7 +205,10 @@ class IndexingForegroundService : Service() {
                 val statusText = "✨ Connecting memories... $totalDone/$total ($updated indexed)"
                 _statusMessage.value = statusText
 
-                if (processedCount % 5 == 0 || processedCount == pendingTotal) {
+                // Throttled notification updates (at most once every 500ms or on completion) to avoid IPC lag
+                val now = System.currentTimeMillis()
+                if (now - lastNotifTime >= 500L || processedCount == pendingTotal) {
+                    lastNotifTime = now
                     val notifManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                     notifManager.notify(NOTIFICATION_ID, buildNotification(statusText, progressPct, 100))
                 }

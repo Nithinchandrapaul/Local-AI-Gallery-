@@ -12,8 +12,8 @@ android {
         applicationId = "com.sunny.localphotoai"
         minSdk = 31
         targetSdk = 36
-        versionCode = 20
-        versionName = "3.3.3"
+        versionCode = 21
+        versionName = "3.3.4"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -56,6 +56,10 @@ android {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         resources.excludes += "/META-INF/{LGPL2.1,AL2.0}"
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 kotlin {
@@ -77,4 +81,9 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.biometric:biometric:1.2.0-alpha05")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
+
+    // Automated Unit Testing & Benchmarking Suite
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    testImplementation("io.mockk:mockk:1.13.12")
 }

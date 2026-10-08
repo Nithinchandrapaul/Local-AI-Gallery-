@@ -53,6 +53,9 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
+      - name: Run automated unit tests & benchmarking verification
+        run: gradle --no-daemon --stacktrace testDebugUnitTest
+
       - name: Build release APK and App Bundle
         run: gradle --no-daemon --stacktrace assembleDebug assembleRelease bundleRelease
 
@@ -82,16 +85,16 @@ jobs:
           RELEASE_APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
           DEBUG_APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
           RELEASE_AAB=$(find app/build/outputs/bundle/release -name '*.aab' | head -1)
-          cp "$RELEASE_APK" "dist/LeoAiLocalGallery-v3.3.3-installable.apk"
-          cp "$RELEASE_APK" "dist/LeoAiLocalGallery-v3.3.3-release.apk"
-          cp "$RELEASE_AAB" "dist/LeoAiLocalGallery-v3.3.3-release.aab"
+          cp "$RELEASE_APK" "dist/LeoAiLocalGallery-v3.3.4-installable.apk"
+          cp "$RELEASE_APK" "dist/LeoAiLocalGallery-v3.3.4-release.apk"
+          cp "$RELEASE_AAB" "dist/LeoAiLocalGallery-v3.3.4-release.aab"
           ls -lh dist/
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
           name: LeoAiLocalGallery-installable-apk
-          path: dist/LeoAiLocalGallery-v3.3.3-installable.apk
+          path: dist/LeoAiLocalGallery-v3.3.4-installable.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -99,7 +102,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: LeoAiLocalGallery-release-apk
-          path: dist/LeoAiLocalGallery-v3.3.3-release.apk
+          path: dist/LeoAiLocalGallery-v3.3.4-release.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -107,7 +110,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: LeoAiLocalGallery-release-aab
-          path: dist/LeoAiLocalGallery-v3.3.3-release.aab
+          path: dist/LeoAiLocalGallery-v3.3.4-release.aab
           if-no-files-found: error
           retention-days: 14
 
@@ -116,8 +119,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/LeoAiLocalGallery-v3.3.3-installable.apk
-            dist/LeoAiLocalGallery-v3.3.3-release.apk
-            dist/LeoAiLocalGallery-v3.3.3-release.aab
+            dist/LeoAiLocalGallery-v3.3.4-installable.apk
+            dist/LeoAiLocalGallery-v3.3.4-release.apk
+            dist/LeoAiLocalGallery-v3.3.4-release.aab
           generate_release_notes: true
 
