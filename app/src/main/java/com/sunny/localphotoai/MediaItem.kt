@@ -26,6 +26,7 @@ data class MediaItem(
     val isHeavilyCompressed: Boolean = false,
     val isBadExposure: Boolean = false,
     val qualityReason: String? = null,
+    val isBurstCandidate: Boolean = false,
     val isVideo: Boolean = false,
     val durationMs: Long = 0L
 ) {
