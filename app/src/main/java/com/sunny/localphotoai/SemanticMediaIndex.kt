@@ -279,19 +279,17 @@ class SemanticMediaIndex(context: Context) {
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+            // Data preservation guarantee: NEVER drop tables or delete user indexes during upgrade
+            runCatching {
+                db.execSQL("CREATE TABLE IF NOT EXISTS vectors(id INTEGER PRIMARY KEY, uri TEXT NOT NULL, name TEXT, path TEXT, size INTEGER NOT NULL DEFAULT 0, date_added INTEGER NOT NULL DEFAULT 0, embedding BLOB NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_vectors_date ON vectors(date_added)")
+            }
             if (oldVersion < 2) {
-                db.execSQL("ALTER TABLE vectors ADD COLUMN size INTEGER NOT NULL DEFAULT 0")
-                db.execSQL("ALTER TABLE vectors ADD COLUMN date_added INTEGER NOT NULL DEFAULT 0")
-                db.execSQL("CREATE INDEX IF NOT EXISTS idx_vectors_date ON vectors(date_added)")
+                runCatching { db.execSQL("ALTER TABLE vectors ADD COLUMN size INTEGER NOT NULL DEFAULT 0") }
+                runCatching { db.execSQL("ALTER TABLE vectors ADD COLUMN date_added INTEGER NOT NULL DEFAULT 0") }
+                runCatching { db.execSQL("CREATE INDEX IF NOT EXISTS idx_vectors_date ON vectors(date_added)") }
             }
-            if (oldVersion < 3) {
-                db.execSQL("DROP TABLE IF EXISTS vectors")
-                db.execSQL("CREATE TABLE vectors(id INTEGER PRIMARY KEY, uri TEXT NOT NULL, name TEXT, path TEXT, size INTEGER NOT NULL DEFAULT 0, date_added INTEGER NOT NULL DEFAULT 0, embedding BLOB NOT NULL)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS idx_vectors_date ON vectors(date_added)")
-            }
-            if (oldVersion < 4) {
-                createExtraTables(db)
-            }
+            createExtraTables(db)
         }
 
         private fun createExtraTables(db: SQLiteDatabase) {

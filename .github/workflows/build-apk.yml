@@ -56,12 +56,12 @@ jobs:
       - name: Build release APK and App Bundle
         run: gradle --no-daemon --stacktrace assembleDebug assembleRelease bundleRelease
 
-      - name: Verify installable debug APK
+      - name: Verify installable signed APK
         run: |
-          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
           test -s "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
-          echo "Installable debug APK: $APK"
+          echo "Installable signed APK: $APK"
           ls -lh "$APK"
 
       - name: Verify bundled model is inside APK
@@ -79,27 +79,27 @@ jobs:
       - name: Stage branded release artifacts
         run: |
           mkdir -p dist
-          DEBUG_APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
           RELEASE_APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          DEBUG_APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
           RELEASE_AAB=$(find app/build/outputs/bundle/release -name '*.aab' | head -1)
-          cp "$DEBUG_APK" "dist/LeoAiLocalGallery-v3.3.0-installable.apk"
-          cp "$RELEASE_APK" "dist/LeoAiLocalGallery-v3.3.0-release-unsigned.apk"
-          cp "$RELEASE_AAB" "dist/LeoAiLocalGallery-v3.3.0-release.aab"
+          cp "$RELEASE_APK" "dist/LeoAiLocalGallery-v3.3.1-installable.apk"
+          cp "$RELEASE_APK" "dist/LeoAiLocalGallery-v3.3.1-release.apk"
+          cp "$RELEASE_AAB" "dist/LeoAiLocalGallery-v3.3.1-release.aab"
           ls -lh dist/
 
-      - name: Upload installable debug APK
+      - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
           name: LeoAiLocalGallery-installable-apk
-          path: dist/LeoAiLocalGallery-v3.3.0-installable.apk
+          path: dist/LeoAiLocalGallery-v3.3.1-installable.apk
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload unsigned release APK for Play/signing pipeline
+      - name: Upload signed release APK
         uses: actions/upload-artifact@v4
         with:
-          name: LeoAiLocalGallery-release-apk-unsigned
-          path: dist/LeoAiLocalGallery-v3.3.0-release-unsigned.apk
+          name: LeoAiLocalGallery-release-apk
+          path: dist/LeoAiLocalGallery-v3.3.1-release.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -107,7 +107,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: LeoAiLocalGallery-release-aab
-          path: dist/LeoAiLocalGallery-v3.3.0-release.aab
+          path: dist/LeoAiLocalGallery-v3.3.1-release.aab
           if-no-files-found: error
           retention-days: 14
 
@@ -116,8 +116,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/LeoAiLocalGallery-v3.3.0-installable.apk
-            dist/LeoAiLocalGallery-v3.3.0-release-unsigned.apk
-            dist/LeoAiLocalGallery-v3.3.0-release.aab
+            dist/LeoAiLocalGallery-v3.3.1-installable.apk
+            dist/LeoAiLocalGallery-v3.3.1-release.apk
+            dist/LeoAiLocalGallery-v3.3.1-release.aab
           generate_release_notes: true
 

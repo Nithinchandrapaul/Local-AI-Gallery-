@@ -12,11 +12,32 @@ android {
         applicationId = "com.sunny.localphotoai"
         minSdk = 31
         targetSdk = 36
-        versionCode = 17
-        versionName = "3.3.0"
+        versionCode = 18
+        versionName = "3.3.1"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file("keystore/leo_release.keystore")
+            storePassword = "leo_ai_gallery_keystore_pass"
+            keyAlias = "leo_key"
+            keyPassword = "leo_ai_gallery_keystore_pass"
+            enableV1Signing = true
+            enableV2Signing = true
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("release")
+        }
+        getByName("release") {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
