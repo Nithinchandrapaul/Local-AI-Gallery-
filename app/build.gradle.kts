@@ -12,8 +12,8 @@ android {
         applicationId = "com.sunny.localphotoai"
         minSdk = 31
         targetSdk = 36
-        versionCode = 16
-        versionName = "3.2.0"
+        versionCode = 17
+        versionName = "3.3.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -50,4 +50,6 @@ dependencies {
     implementation("androidx.compose.material3:material3:1.4.0")
     implementation("androidx.compose.foundation:foundation:1.9.3")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("androidx.biometric:biometric:1.2.0-alpha05")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 }

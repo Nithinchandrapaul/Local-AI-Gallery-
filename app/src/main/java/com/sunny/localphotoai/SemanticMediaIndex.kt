@@ -1,5 +1,6 @@
 package com.sunny.localphotoai
 
+import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
@@ -10,6 +11,21 @@ import java.nio.ByteOrder
 import kotlin.math.sqrt
 
 data class SemanticHit(val item: MediaItem, val score: Double)
+
+data class CachedCleanupData(
+    val id: Long,
+    val size: Long,
+    val dateAdded: Long,
+    val sha256: String?,
+    val dHash: Long?,
+    val qualityScore: Int,
+    val isBlurry: Boolean,
+    val isBadExposure: Boolean,
+    val isHeavilyCompressed: Boolean,
+    val isLowResolution: Boolean,
+    val qualityReason: String?,
+    val isPersonalCamera: Boolean
+)
 
 class SemanticMediaIndex(context: Context) {
     private val db = Helper(context.applicationContext)
@@ -148,10 +164,118 @@ class SemanticMediaIndex(context: Context) {
         return if (aa == 0.0 || bb == 0.0) 0.0 else dot / (sqrt(aa) * sqrt(bb))
     }
 
-    private class Helper(ctx: Context) : SQLiteOpenHelper(ctx, "local_photo_ai.db", null, 3) {
+    // ==========================================
+    // PERSISTENT CLEANUP ANALYSIS CACHE
+    // ==========================================
+
+    suspend fun saveCleanupCache(items: List<MediaItem>) = withContext(Dispatchers.IO) {
+        if (items.isEmpty()) return@withContext
+        synchronized(lock) {
+            val database = db.writableDatabase
+            database.beginTransaction()
+            try {
+                val stmt = database.compileStatement(
+                    "INSERT OR REPLACE INTO cleanup_cache(id, size, date_added, sha256, d_hash, quality_score, is_blurry, is_bad_exposure, is_heavily_compressed, is_low_res, quality_reason, is_personal_camera) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
+                )
+                for (item in items) {
+                    stmt.clearBindings()
+                    stmt.bindLong(1, item.id)
+                    stmt.bindLong(2, item.size)
+                    stmt.bindLong(3, item.dateAdded)
+                    if (item.sha256 != null) stmt.bindString(4, item.sha256) else stmt.bindNull(4)
+                    if (item.dHash != null) stmt.bindLong(5, item.dHash) else stmt.bindNull(5)
+                    stmt.bindLong(6, item.qualityScore.toLong())
+                    stmt.bindLong(7, if (item.isBlurry) 1L else 0L)
+                    stmt.bindLong(8, if (item.isBadExposure) 1L else 0L)
+                    stmt.bindLong(9, if (item.isHeavilyCompressed) 1L else 0L)
+                    stmt.bindLong(10, if (item.isLowResolution) 1L else 0L)
+                    if (item.qualityReason != null) stmt.bindString(11, item.qualityReason) else stmt.bindNull(11)
+                    stmt.bindLong(12, if (item.isPersonalCameraPhoto) 1L else 0L)
+                    stmt.executeInsert()
+                }
+                database.setTransactionSuccessful()
+            } finally {
+                database.endTransaction()
+            }
+        }
+    }
+
+    suspend fun loadCleanupCache(): Map<Long, CachedCleanupData> = withContext(Dispatchers.IO) {
+        val map = mutableMapOf<Long, CachedCleanupData>()
+        synchronized(lock) {
+            db.readableDatabase.rawQuery("SELECT id, size, date_added, sha256, d_hash, quality_score, is_blurry, is_bad_exposure, is_heavily_compressed, is_low_res, quality_reason, is_personal_camera FROM cleanup_cache", null).use { c ->
+                val idCol = c.getColumnIndexOrThrow("id")
+                val sizeCol = c.getColumnIndexOrThrow("size")
+                val dateCol = c.getColumnIndexOrThrow("date_added")
+                val shaCol = c.getColumnIndexOrThrow("sha256")
+                val dHashCol = c.getColumnIndexOrThrow("d_hash")
+                val qsCol = c.getColumnIndexOrThrow("quality_score")
+                val blurCol = c.getColumnIndexOrThrow("is_blurry")
+                val expCol = c.getColumnIndexOrThrow("is_bad_exposure")
+                val compCol = c.getColumnIndexOrThrow("is_heavily_compressed")
+                val lowCol = c.getColumnIndexOrThrow("is_low_res")
+                val qrCol = c.getColumnIndexOrThrow("quality_reason")
+                val camCol = c.getColumnIndexOrThrow("is_personal_camera")
+
+                while (c.moveToNext()) {
+                    val id = c.getLong(idCol)
+                    map[id] = CachedCleanupData(
+                        id = id,
+                        size = c.getLong(sizeCol),
+                        dateAdded = c.getLong(dateCol),
+                        sha256 = if (c.isNull(shaCol)) null else c.getString(shaCol),
+                        dHash = if (c.isNull(dHashCol)) null else c.getLong(dHashCol),
+                        qualityScore = c.getInt(qsCol),
+                        isBlurry = c.getInt(blurCol) == 1,
+                        isBadExposure = c.getInt(expCol) == 1,
+                        isHeavilyCompressed = c.getInt(compCol) == 1,
+                        isLowResolution = c.getInt(lowCol) == 1,
+                        qualityReason = if (c.isNull(qrCol)) null else c.getString(qrCol),
+                        isPersonalCamera = c.getInt(camCol) == 1
+                    )
+                }
+            }
+        }
+        map
+    }
+
+    // ==========================================
+    // BIOMETRIC PRIVATE VAULT
+    // ==========================================
+
+    suspend fun addToVault(id: Long) = withContext(Dispatchers.IO) {
+        synchronized(lock) {
+            val cv = ContentValues().apply {
+                put("id", id)
+                put("date_vaulted", System.currentTimeMillis() / 1000)
+            }
+            db.writableDatabase.insertWithOnConflict("vault_items", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+        }
+    }
+
+    suspend fun removeFromVault(id: Long) = withContext(Dispatchers.IO) {
+        synchronized(lock) {
+            db.writableDatabase.delete("vault_items", "id=?", arrayOf(id.toString()))
+        }
+    }
+
+    suspend fun getVaultIds(): Set<Long> = withContext(Dispatchers.IO) {
+        val set = mutableSetOf<Long>()
+        synchronized(lock) {
+            db.readableDatabase.rawQuery("SELECT id FROM vault_items", null).use { c ->
+                while (c.moveToNext()) {
+                    set += c.getLong(0)
+                }
+            }
+        }
+        set
+    }
+
+    private class Helper(ctx: Context) : SQLiteOpenHelper(ctx, "local_photo_ai.db", null, 4) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE vectors(id INTEGER PRIMARY KEY, uri TEXT NOT NULL, name TEXT, path TEXT, size INTEGER NOT NULL DEFAULT 0, date_added INTEGER NOT NULL DEFAULT 0, embedding BLOB NOT NULL)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_vectors_date ON vectors(date_added)")
+            createExtraTables(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -162,8 +286,32 @@ class SemanticMediaIndex(context: Context) {
             }
             if (oldVersion < 3) {
                 db.execSQL("DROP TABLE IF EXISTS vectors")
-                onCreate(db)
+                db.execSQL("CREATE TABLE vectors(id INTEGER PRIMARY KEY, uri TEXT NOT NULL, name TEXT, path TEXT, size INTEGER NOT NULL DEFAULT 0, date_added INTEGER NOT NULL DEFAULT 0, embedding BLOB NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_vectors_date ON vectors(date_added)")
             }
+            if (oldVersion < 4) {
+                createExtraTables(db)
+            }
+        }
+
+        private fun createExtraTables(db: SQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS cleanup_cache(
+                    id INTEGER PRIMARY KEY,
+                    size INTEGER NOT NULL,
+                    date_added INTEGER NOT NULL,
+                    sha256 TEXT,
+                    d_hash INTEGER,
+                    quality_score INTEGER NOT NULL,
+                    is_blurry INTEGER NOT NULL,
+                    is_bad_exposure INTEGER NOT NULL,
+                    is_heavily_compressed INTEGER NOT NULL,
+                    is_low_res INTEGER NOT NULL,
+                    quality_reason TEXT,
+                    is_personal_camera INTEGER NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE TABLE IF NOT EXISTS vault_items(id INTEGER PRIMARY KEY, date_vaulted INTEGER NOT NULL)")
         }
     }
 }

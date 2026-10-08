@@ -18,9 +18,12 @@ class EmbeddingEngine(private val context: Context) {
     companion object {
         const val STORAGE_DIMENSION = 256
         const val MODEL_ASSET_PATH = "models/embeddinggemma-2-text-vision-440m.litertlm"
+        private const val TAG = "EmbeddingEngine"
     }
 
     private var embedder: UniversalEmbedder? = null
+    var isGpuAccelerated: Boolean = false
+        private set
     var lastError: String? = null
         private set
 
@@ -31,43 +34,78 @@ class EmbeddingEngine(private val context: Context) {
         // Explicitly attempt native library load if needed
         runCatching {
             System.loadLibrary("litertlm_jni")
-            Log.i("EmbeddingEngine", "Preloaded liblitertlm_jni.so successfully")
+            Log.i(TAG, "Preloaded liblitertlm_jni.so successfully")
         }.onFailure { t ->
-            Log.w("EmbeddingEngine", "Notice: System.loadLibrary('litertlm_jni'): ${t.message}")
+            Log.w(TAG, "Notice: System.loadLibrary('litertlm_jni'): ${t.message}")
         }
 
-        // 1. Primary path: Direct zero-copy loading from APK assets
+        // 1. Try Hardware-Accelerated GPU Delegate (Vulkan/OpenCL) via Asset
         try {
             val options = UniversalEmbedderOptions.builder()
-                .setBaseOptions(BaseOptions.builder().setModelAssetPath(MODEL_ASSET_PATH).build())
+                .setBaseOptions(
+                    BaseOptions.builder()
+                        .setModelAssetPath(MODEL_ASSET_PATH)
+                        .setDelegate(BaseOptions.Delegate.GPU)
+                        .build()
+                )
                 .setL2Normalize(true)
                 .build()
             embedder = UniversalEmbedder.createFromOptions(context, options)
-            Log.i("EmbeddingEngine", "Model loaded successfully from asset path: $MODEL_ASSET_PATH")
+            isGpuAccelerated = true
+            Log.i(TAG, "Loaded model successfully with GPU acceleration from asset: $MODEL_ASSET_PATH")
             return@withContext true
-        } catch (e: Throwable) {
-            Log.w("EmbeddingEngine", "Direct asset load failed: ${e.message}, trying FileDescriptor fallback...", e)
-            lastError = e.message ?: e.javaClass.simpleName
+        } catch (eGpu: Throwable) {
+            Log.w(TAG, "GPU asset initialization fallback to CPU: ${eGpu.message}")
         }
 
-        // 2. Fallback path: Load via extracted internal file descriptor
+        // 2. Try High-Performance CPU Delegate via Asset
+        try {
+            val options = UniversalEmbedderOptions.builder()
+                .setBaseOptions(
+                    BaseOptions.builder()
+                        .setModelAssetPath(MODEL_ASSET_PATH)
+                        .setDelegate(BaseOptions.Delegate.CPU)
+                        .build()
+                )
+                .setL2Normalize(true)
+                .build()
+            embedder = UniversalEmbedder.createFromOptions(context, options)
+            isGpuAccelerated = false
+            Log.i(TAG, "Loaded model successfully with CPU from asset: $MODEL_ASSET_PATH")
+            return@withContext true
+        } catch (eCpu: Throwable) {
+            Log.w(TAG, "Direct asset load failed: ${eCpu.message}, trying FileDescriptor fallback...", eCpu)
+            lastError = eCpu.message ?: eCpu.javaClass.simpleName
+        }
+
+        // 3. Fallback: Load via extracted internal file descriptor (GPU then CPU)
         try {
             val file = ModelDownloader.modelFile(context)
-            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
-                val options = UniversalEmbedderOptions.builder()
-                    .setBaseOptions(BaseOptions.builder().setModelAssetFileDescriptor(pfd.fd).build())
-                    .setL2Normalize(true)
-                    .build()
-                embedder = UniversalEmbedder.createFromOptions(context, options)
-                Log.i("EmbeddingEngine", "Model loaded successfully from extracted file descriptor: ${file.absolutePath}")
-                lastError = null
-                return@withContext true
+            if (file.exists() && file.length() > 0) {
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                    // Attempt CPU on extracted file
+                    val options = UniversalEmbedderOptions.builder()
+                        .setBaseOptions(
+                            BaseOptions.builder()
+                                .setModelAssetFileDescriptor(pfd.fd)
+                                .setDelegate(BaseOptions.Delegate.CPU)
+                                .build()
+                        )
+                        .setL2Normalize(true)
+                        .build()
+                    embedder = UniversalEmbedder.createFromOptions(context, options)
+                    isGpuAccelerated = false
+                    Log.i(TAG, "Loaded model successfully from file descriptor: ${file.absolutePath}")
+                    lastError = null
+                    return@withContext true
+                }
             }
         } catch (e2: Throwable) {
-            Log.e("EmbeddingEngine", "Fallback file descriptor load failed: ${e2.message}", e2)
+            Log.e(TAG, "Fallback file descriptor load failed: ${e2.message}", e2)
             lastError = "Asset error: ${lastError ?: "unknown"} | File error: ${e2.message ?: e2.javaClass.simpleName}"
-            false
         }
+
+        false
     }
 
     suspend fun embedText(text: String): FloatArray? = withContext(Dispatchers.Default) {
@@ -86,9 +124,24 @@ class EmbeddingEngine(private val context: Context) {
         }.getOrNull()
     }
 
+    suspend fun embedBitmap(bmp: Bitmap): FloatArray? = withContext(Dispatchers.Default) {
+        runCatching {
+            val softwareBmp = if (bmp.config == Bitmap.Config.HARDWARE) {
+                bmp.copy(Bitmap.Config.ARGB_8888, false)
+            } else {
+                bmp
+            }
+            val mp = BitmapImageBuilder(softwareBmp).build()
+            val result = embedder?.embedImage(mp)
+            if (softwareBmp !== bmp) {
+                softwareBmp.recycle()
+            }
+            result?.embeddings()?.firstOrNull()?.floatEmbedding()?.let(::compact)
+        }.getOrNull()
+    }
+
     fun loadOptimizedBitmap(uri: Uri, targetSize: Int = 224): Bitmap? {
         // Fast Path 1: System MediaStore thumbnail (5-15ms)
-        // Must convert HARDWARE config to software ARGB_8888 for MediaPipe
         val thumb = runCatching {
             context.contentResolver.loadThumbnail(uri, android.util.Size(targetSize, targetSize), null)
         }.getOrNull()

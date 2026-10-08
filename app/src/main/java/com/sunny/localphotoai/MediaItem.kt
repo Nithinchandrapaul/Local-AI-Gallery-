@@ -28,7 +28,12 @@ data class MediaItem(
     val qualityReason: String? = null,
     val isBurstCandidate: Boolean = false,
     val isVideo: Boolean = false,
-    val durationMs: Long = 0L
+    val durationMs: Long = 0L,
+    val isPersonalCameraPhoto: Boolean = false,
+    val cameraModel: String? = null,
+    val isTrashed: Boolean = false,
+    val trashedDaysRemaining: Int = 30,
+    val isVaulted: Boolean = false
 ) {
     val sizeMb: Double get() = size / 1024.0 / 1024.0
     val isLargeVideo: Boolean get() = isVideo && size > 50 * 1024 * 1024

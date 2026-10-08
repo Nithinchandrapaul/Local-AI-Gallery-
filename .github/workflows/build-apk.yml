@@ -82,16 +82,16 @@ jobs:
           DEBUG_APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
           RELEASE_APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
           RELEASE_AAB=$(find app/build/outputs/bundle/release -name '*.aab' | head -1)
-          cp "$DEBUG_APK" "dist/LeoAiLocalGallery-v3.2.0-installable.apk"
-          cp "$RELEASE_APK" "dist/LeoAiLocalGallery-v3.2.0-release-unsigned.apk"
-          cp "$RELEASE_AAB" "dist/LeoAiLocalGallery-v3.2.0-release.aab"
+          cp "$DEBUG_APK" "dist/LeoAiLocalGallery-v3.3.0-installable.apk"
+          cp "$RELEASE_APK" "dist/LeoAiLocalGallery-v3.3.0-release-unsigned.apk"
+          cp "$RELEASE_AAB" "dist/LeoAiLocalGallery-v3.3.0-release.aab"
           ls -lh dist/
 
       - name: Upload installable debug APK
         uses: actions/upload-artifact@v4
         with:
           name: LeoAiLocalGallery-installable-apk
-          path: dist/LeoAiLocalGallery-v3.2.0-installable.apk
+          path: dist/LeoAiLocalGallery-v3.3.0-installable.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -99,7 +99,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: LeoAiLocalGallery-release-apk-unsigned
-          path: dist/LeoAiLocalGallery-v3.2.0-release-unsigned.apk
+          path: dist/LeoAiLocalGallery-v3.3.0-release-unsigned.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -107,7 +107,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: LeoAiLocalGallery-release-aab
-          path: dist/LeoAiLocalGallery-v3.2.0-release.aab
+          path: dist/LeoAiLocalGallery-v3.3.0-release.aab
           if-no-files-found: error
           retention-days: 14
 
@@ -116,8 +116,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/LeoAiLocalGallery-v3.2.0-installable.apk
-            dist/LeoAiLocalGallery-v3.2.0-release-unsigned.apk
-            dist/LeoAiLocalGallery-v3.2.0-release.aab
+            dist/LeoAiLocalGallery-v3.3.0-installable.apk
+            dist/LeoAiLocalGallery-v3.3.0-release-unsigned.apk
+            dist/LeoAiLocalGallery-v3.3.0-release.aab
           generate_release_notes: true
 
