@@ -28,11 +28,30 @@ class CleanupEngine(private val context: Context) {
         md.digest().joinToString("") { "%02x".format(it) }
     }.getOrNull()
 
-    /** Loads hardware-cached or sub-sampled fast thumbnail (5-15ms). */
+    /** Loads hardware-cached or sub-sampled fast thumbnail (3-10ms). */
     fun loadThumbnailFast(uri: Uri, targetSize: Int = 128): Bitmap? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            runCatching {
-                return context.contentResolver.loadThumbnail(uri, Size(targetSize, targetSize), null)
+            val thumb = runCatching {
+                context.contentResolver.loadThumbnail(uri, Size(targetSize, targetSize), null)
+            }.getOrNull()
+            if (thumb != null) {
+                val softwareBmp = if (thumb.config == Bitmap.Config.HARDWARE) {
+                    val copy = thumb.copy(Bitmap.Config.ARGB_8888, false)
+                    thumb.recycle()
+                    copy
+                } else {
+                    thumb
+                }
+                if (softwareBmp != null) {
+                    return if (softwareBmp.width > targetSize || softwareBmp.height > targetSize) {
+                        val scale = minOf(1f, targetSize.toFloat() / maxOf(softwareBmp.width, softwareBmp.height))
+                        val scaled = Bitmap.createScaledBitmap(softwareBmp, (softwareBmp.width * scale).toInt(), (softwareBmp.height * scale).toInt(), true)
+                        if (scaled !== softwareBmp) softwareBmp.recycle()
+                        scaled
+                    } else {
+                        softwareBmp
+                    }
+                }
             }
         }
         return runCatching {

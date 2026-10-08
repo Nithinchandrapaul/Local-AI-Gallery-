@@ -368,7 +368,7 @@ fun LocalPhotoAIApp() {
                                 scope.launch {
                                     busy = true
                                     status = "✨ Analyzing gallery clutter and quality..."
-                                    report = analyzer.analyze(allItems, forceRefresh = true)
+                                    report = analyzer.analyze(allItems, forceRefresh = false)
                                     status = "Analysis complete: ${report?.recommendedDeleteIds?.size ?: 0} duplicates flagged"
                                     busy = false
                                 }
@@ -400,8 +400,8 @@ fun LocalPhotoAIApp() {
 
             if (showIndexOptionsDialog) {
                 val totalPhotos = items.count { !it.isVideo }
-                var cachedCount by remember { mutableIntStateOf(0) }
-                LaunchedEffect(Unit) { cachedCount = index.count() }
+                val liveCount by SemanticMediaIndex.liveIndexedCount.collectAsState()
+                LaunchedEffect(Unit) { index.ensureCacheLoaded() }
 
                 AlertDialog(
                     onDismissRequest = { showIndexOptionsDialog = false },
@@ -418,7 +418,7 @@ fun LocalPhotoAIApp() {
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    "✨ Currently indexed: $cachedCount of $totalPhotos photos",
+                                    "✨ Currently indexed: $liveCount of $totalPhotos photos",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                                     modifier = Modifier.padding(8.dp)

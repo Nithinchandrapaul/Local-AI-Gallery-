@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.os.Build
 import android.os.IBinder
 import android.os.VibrationEffect
@@ -16,8 +17,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 
 class IndexingForegroundService : Service() {
@@ -106,48 +109,106 @@ class IndexingForegroundService : Service() {
                 return@launch
             }
 
+            // Ensure live in-memory cache is primed
+            index.ensureCacheLoaded()
+
             val allMedia = repo.scanAll().filter { !it.isVideo }
             val targetPhotos = if (limit != null) allMedia.take(limit) else allMedia
             val total = targetPhotos.size
             val metadataMap = index.getIndexedMetadataMap()
 
-            var updated = 0
-            val batch = mutableListOf<Pair<MediaItem, FloatArray>>()
+            // Filter to items needing indexing
+            val pendingItems = targetPhotos.filter { item ->
+                val existing = metadataMap[item.id]
+                existing == null || existing.first != item.size || existing.second != item.dateAdded
+            }
 
-            for (i in targetPhotos.indices) {
+            val alreadyIndexedCount = total - pendingItems.size
+            var updated = 0
+            val pendingTotal = pendingItems.size
+
+            if (pendingTotal == 0) {
+                _progress.value = 1f
+                _statusMessage.value = "✨ All $total photos are already indexed and up to date!"
+                embedder.close()
+                _isRunning.value = false
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return@launch
+            }
+
+            // Bounded prefetch pipeline channel (capacity = 8)
+            val prefetchChannel = Channel<Pair<MediaItem, Bitmap>?>(capacity = 8)
+
+            // Stage 1: Dual-worker I/O Prefetch & Fast Decode Pipeline (Dispatchers.IO)
+            val prefetchJob = launch(Dispatchers.IO) {
+                val workerCount = 2
+                val itemQueue = Channel<MediaItem>(capacity = Channel.UNLIMITED)
+                for (item in pendingItems) {
+                    itemQueue.send(item)
+                }
+                itemQueue.close()
+
+                val workers = (0 until workerCount).map {
+                    launch {
+                        for (item in itemQueue) {
+                            if (isStopRequested) break
+                            val bmp = embedder.loadOptimizedBitmap(item.uri, 224)
+                            if (bmp != null) {
+                                prefetchChannel.send(item to bmp)
+                            } else {
+                                prefetchChannel.send(null)
+                            }
+                        }
+                    }
+                }
+                workers.joinAll()
+                prefetchChannel.close()
+            }
+
+            // Stage 2: High-Performance Neural Inference & Real-Time Dispatch (Dispatchers.Default)
+            val batch = mutableListOf<Pair<MediaItem, FloatArray>>()
+            var processedCount = 0
+
+            for (entry in prefetchChannel) {
                 if (isStopRequested) {
-                    _statusMessage.value = "Indexing paused: $i/$total photos processed."
+                    entry?.second?.recycle()
                     break
                 }
+                processedCount++
+                if (entry != null) {
+                    val (item, bmp) = entry
+                    val vector = embedder.embedBitmap(bmp)
+                    bmp.recycle()
 
-                val item = targetPhotos[i]
-                val existing = metadataMap[item.id]
-
-                if (existing == null || existing.first != item.size || existing.second != item.dateAdded) {
-                    val vector = embedder.embedImage(item.uri)
                     if (vector != null) {
+                        // REAL-TIME AVAILABILITY: Immediately register into live in-memory search index!
+                        index.registerLive(item, vector)
                         batch += (item to vector)
                         updated++
                     }
                 }
 
-                if (batch.size >= 10 || i == targetPhotos.lastIndex) {
+                // Write-ahead flush every 5 items or at the end to keep SQLite updated
+                if (batch.size >= 5 || processedCount == pendingTotal) {
                     index.putBatch(batch)
                     batch.clear()
                 }
 
-                if (i % 6 == 0 || i == targetPhotos.lastIndex) {
-                    val progressFraction = (i + 1).toFloat() / total
-                    _progress.value = progressFraction
-                    val progressPct = ((i + 1) * 100) / maxOf(1, total)
-                    val statusText = "✨ Connecting memories... ${i + 1}/$total ($updated indexed)"
-                    _statusMessage.value = statusText
+                val totalDone = alreadyIndexedCount + processedCount
+                val progressFraction = totalDone.toFloat() / total
+                _progress.value = progressFraction
+                val progressPct = (totalDone * 100) / maxOf(1, total)
+                val statusText = "✨ Connecting memories... $totalDone/$total ($updated indexed)"
+                _statusMessage.value = statusText
 
+                if (processedCount % 5 == 0 || processedCount == pendingTotal) {
                     val notifManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                     notifManager.notify(NOTIFICATION_ID, buildNotification(statusText, progressPct, 100))
                 }
             }
 
+            prefetchJob.cancel()
             if (batch.isNotEmpty()) {
                 index.putBatch(batch)
                 batch.clear()

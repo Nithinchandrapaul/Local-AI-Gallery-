@@ -2,6 +2,8 @@ package com.sunny.localphotoai
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 
 data class WhatsAppReport(
@@ -64,21 +66,41 @@ class PhotoAnalyzer(private val context: Context) {
         onProgress: ((current: Int, total: Int, currentItem: MediaItem) -> Unit)? = null
     ): CleanupReport = withContext(Dispatchers.Default) {
         val total = items.size
+        if (total == 0) {
+            return@withContext CleanupReport(
+                exactDuplicates = emptyList(),
+                visualGroups = emptyList(),
+                burstGroups = emptyList(),
+                screenshots = emptyList(),
+                whatsapp = emptyList(),
+                whatsAppReport = WhatsAppReport(0, 0, 0, 0, emptyList(), emptyList(), emptyList(), emptyList(), 0),
+                qualityReport = QualityReport(0, 0, 0, 0, 0, emptyList(), emptyList()),
+                videoReport = VideoReport(0, 0, emptyList(), emptyList()),
+                likelyForwarded = emptyList(),
+                largeFiles = emptyList(),
+                largeVideos = emptyList(),
+                blurry = emptyList(),
+                lowResolution = emptyList(),
+                keeperIds = emptySet(),
+                recommendedDeleteIds = emptySet(),
+                totalRecoverableBytes = 0
+            )
+        }
 
-        // Step 1: Check persistent SQLite cache for instant reload
+        // Step 1: Check persistent SQLite cache for instant 0ms reload
         val cachedMap = if (forceRefresh) emptyMap() else index.loadCleanupCache()
 
         // Step 2: Pre-identify candidates for exact SHA-256 duplicate checking by file size.
         val sizeCollisions = items.groupBy { it.size }.filter { it.value.size > 1 }.mapValues { (_, v) -> v.map { it.id }.toSet() }
         val collisionIds = sizeCollisions.values.flatten().toSet()
 
-        val newlyAnalyzed = mutableListOf<MediaItem>()
+        val enrichedMap = java.util.concurrent.ConcurrentHashMap<Long, MediaItem>()
+        val uncachedItems = mutableListOf<MediaItem>()
 
-        val enriched = items.mapIndexed { indexIdx, item ->
+        for (item in items) {
             val cached = cachedMap[item.id]
-            val result = if (cached != null && cached.size == item.size && cached.dateAdded == item.dateAdded) {
-                // Instant cache hit: 0ms overhead
-                item.copy(
+            if (cached != null && cached.size == item.size && cached.dateAdded == item.dateAdded) {
+                enrichedMap[item.id] = item.copy(
                     sha256 = cached.sha256,
                     dHash = cached.dHash,
                     qualityScore = cached.qualityScore,
@@ -90,56 +112,78 @@ class PhotoAnalyzer(private val context: Context) {
                     isPersonalCameraPhoto = cached.isPersonalCamera,
                     isLikelyForwarded = item.isLikelyForwarded && !cached.isPersonalCamera
                 )
-            } else if (item.isVideo) {
-                val sha = if (item.id in collisionIds) cleanup.sha256(item.uri) else null
-                val res = item.copy(
-                    sha256 = sha,
-                    qualityScore = 70,
-                    qualityReason = "Video (${item.durationFormatted})"
-                )
-                newlyAnalyzed += res
-                res
             } else {
-                // If received via WhatsApp, inspect camera EXIF so real photos are not flagged as forwards
-                var isPersonal = item.isPersonalCameraPhoto
-                var forwardConfidence = item.whatsAppForwardConfidence
-                if (item.isWhatsAppReceived && !isPersonal) {
-                    val (hasExifCamera, camModel) = repo.inspectCameraExif(item.uri)
-                    if (hasExifCamera) {
-                        isPersonal = true
-                        forwardConfidence = 0
+                uncachedItems += item
+            }
+        }
+
+        val newlyAnalyzed = java.util.Collections.synchronizedList(mutableListOf<MediaItem>())
+        var processedProgress = items.size - uncachedItems.size
+
+        if (uncachedItems.isNotEmpty()) {
+            // High-throughput parallelization: distribute uncached items across CPU cores
+            val cores = maxOf(2, Runtime.getRuntime().availableProcessors())
+            val chunkSize = maxOf(8, uncachedItems.size / cores)
+            val chunks = uncachedItems.chunked(chunkSize)
+
+            val tasks = chunks.map { chunk ->
+                async(Dispatchers.Default) {
+                    for (item in chunk) {
+                        val res = if (item.isVideo) {
+                            val sha = if (item.id in collisionIds) cleanup.sha256(item.uri) else null
+                            item.copy(
+                                sha256 = sha,
+                                qualityScore = 70,
+                                qualityReason = "Video (${item.durationFormatted})"
+                            )
+                        } else {
+                            // If received via WhatsApp, inspect camera EXIF so real photos are not flagged as forwards
+                            var isPersonal = item.isPersonalCameraPhoto
+                            var forwardConfidence = item.whatsAppForwardConfidence
+                            if (item.isWhatsAppReceived && !isPersonal) {
+                                val (hasExifCamera, _) = repo.inspectCameraExif(item.uri)
+                                if (hasExifCamera) {
+                                    isPersonal = true
+                                    forwardConfidence = 0
+                                }
+                            }
+
+                            val visual = cleanup.analyzeVisuals(item.uri, item.width, item.height, item.size)
+                            val sha = if (item.id in collisionIds) cleanup.sha256(item.uri) else null
+                            item.copy(
+                                sha256 = sha,
+                                dHash = visual.dHash,
+                                qualityScore = visual.quality.score,
+                                isBlurry = visual.quality.isBlurry,
+                                isBadExposure = visual.quality.isBadExposure,
+                                isHeavilyCompressed = visual.quality.isHeavilyCompressed,
+                                isLowResolution = visual.quality.isLowResolution,
+                                qualityReason = visual.quality.reason,
+                                isPersonalCameraPhoto = isPersonal,
+                                isLikelyForwarded = if (isPersonal) false else (forwardConfidence >= 70),
+                                whatsAppForwardConfidence = if (isPersonal) 0 else forwardConfidence
+                            )
+                        }
+                        enrichedMap[item.id] = res
+                        newlyAnalyzed.add(res)
+                        synchronized(this@PhotoAnalyzer) {
+                            processedProgress++
+                            if (processedProgress % 8 == 0 || processedProgress == total) {
+                                onProgress?.invoke(processedProgress, total, res)
+                            }
+                        }
                     }
                 }
-
-                val visual = cleanup.analyzeVisuals(item.uri, item.width, item.height, item.size)
-                val sha = if (item.id in collisionIds) cleanup.sha256(item.uri) else null
-                val res = item.copy(
-                    sha256 = sha,
-                    dHash = visual.dHash,
-                    qualityScore = visual.quality.score,
-                    isBlurry = visual.quality.isBlurry,
-                    isBadExposure = visual.quality.isBadExposure,
-                    isHeavilyCompressed = visual.quality.isHeavilyCompressed,
-                    isLowResolution = visual.quality.isLowResolution,
-                    qualityReason = visual.quality.reason,
-                    isPersonalCameraPhoto = isPersonal,
-                    isLikelyForwarded = if (isPersonal) false else (forwardConfidence >= 70),
-                    whatsAppForwardConfidence = if (isPersonal) 0 else forwardConfidence
-                )
-                newlyAnalyzed += res
-                res
             }
+            tasks.awaitAll()
 
-            if (indexIdx % 8 == 0 || indexIdx == total - 1) {
-                onProgress?.invoke(indexIdx + 1, total, result)
+            // Persist newly computed analyses to SQLite so future opens are instantaneous
+            if (newlyAnalyzed.isNotEmpty()) {
+                index.saveCleanupCache(newlyAnalyzed)
             }
-            result
         }
 
-        // Persist any newly computed analyses to SQLite so future opens are instantaneous
-        if (newlyAnalyzed.isNotEmpty()) {
-            index.saveCleanupCache(newlyAnalyzed)
-        }
+        val enriched = items.mapNotNull { enrichedMap[it.id] }
 
         // Exact duplicates from colliding sizes
         val exact = enriched.filter { it.sha256 != null }

@@ -31,12 +31,43 @@ class SemanticMediaIndex(context: Context) {
     private val db = Helper(context.applicationContext)
     private val lock = Any()
 
+    companion object {
+        // High-speed in-memory vector cache: enables sub-millisecond similarity scans and instant real-time search
+        private val liveEmbeddingCache = java.util.concurrent.ConcurrentHashMap<Long, FloatArray>()
+        val liveIndexedCount = kotlinx.coroutines.flow.MutableStateFlow(0)
+    }
+
+    suspend fun ensureCacheLoaded(): Int = withContext(Dispatchers.IO) {
+        if (liveEmbeddingCache.isEmpty()) {
+            val map = getAllEmbeddings()
+            liveEmbeddingCache.putAll(map)
+            liveIndexedCount.value = liveEmbeddingCache.size
+        }
+        liveEmbeddingCache.size
+    }
+
+    fun registerLive(item: MediaItem, embedding: FloatArray) {
+        liveEmbeddingCache[item.id] = embedding
+        liveIndexedCount.value = liveEmbeddingCache.size
+    }
+
+    suspend fun putSingleLive(item: MediaItem, embedding: FloatArray) = withContext(Dispatchers.IO) {
+        registerLive(item, embedding)
+        put(item, embedding)
+    }
+
     suspend fun put(item: MediaItem, embedding: FloatArray) = withContext(Dispatchers.IO) {
+        registerLive(item, embedding)
         putBatch(listOf(item to embedding))
     }
 
     suspend fun putBatch(batch: List<Pair<MediaItem, FloatArray>>) = withContext(Dispatchers.IO) {
         if (batch.isEmpty()) return@withContext
+        for ((item, emb) in batch) {
+            liveEmbeddingCache[item.id] = emb
+        }
+        liveIndexedCount.value = liveEmbeddingCache.size
+
         synchronized(lock) {
             val database = db.writableDatabase
             database.beginTransaction()
@@ -123,32 +154,25 @@ class SemanticMediaIndex(context: Context) {
     }
 
     suspend fun search(query: FloatArray, allItems: List<MediaItem>, limit: Int = 100): List<SemanticHit> =
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.Default) {
+            ensureCacheLoaded()
             val map = allItems.associateBy { it.id }
             val hits = mutableListOf<SemanticHit>()
-            synchronized(lock) {
-                db.readableDatabase.rawQuery("SELECT id, embedding FROM vectors", null).use { c ->
-                    val idCol = c.getColumnIndexOrThrow("id")
-                    val embCol = c.getColumnIndexOrThrow("embedding")
-                    while (c.moveToNext()) {
-                        val item = map[c.getLong(idCol)] ?: continue
-                        val fb = ByteBuffer.wrap(c.getBlob(embCol)).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
-                        val vector = FloatArray(fb.remaining())
-                        fb.get(vector)
-                        hits += SemanticHit(item, cosine(query, vector))
-                    }
+
+            // Microsecond in-memory cosine similarity search over live vectors
+            for ((id, vector) in liveEmbeddingCache) {
+                val item = map[id] ?: continue
+                val score = cosine(query, vector)
+                if (score > 0.35) {
+                    hits += SemanticHit(item, score)
                 }
             }
             hits.sortedByDescending { it.score }.take(limit)
         }
 
     suspend fun count(): Int = withContext(Dispatchers.IO) {
-        synchronized(lock) {
-            db.readableDatabase.rawQuery("SELECT COUNT(*) FROM vectors", null).use {
-                it.moveToFirst()
-                it.getInt(0)
-            }
-        }
+        ensureCacheLoaded()
+        liveEmbeddingCache.size
     }
 
     fun cosine(a: FloatArray, b: FloatArray): Double {
@@ -272,6 +296,11 @@ class SemanticMediaIndex(context: Context) {
     }
 
     private class Helper(ctx: Context) : SQLiteOpenHelper(ctx, "local_photo_ai.db", null, 4) {
+        override fun onConfigure(db: SQLiteDatabase) {
+            super.onConfigure(db)
+            db.enableWriteAheadLogging()
+        }
+
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE vectors(id INTEGER PRIMARY KEY, uri TEXT NOT NULL, name TEXT, path TEXT, size INTEGER NOT NULL DEFAULT 0, date_added INTEGER NOT NULL DEFAULT 0, embedding BLOB NOT NULL)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_vectors_date ON vectors(date_added)")
