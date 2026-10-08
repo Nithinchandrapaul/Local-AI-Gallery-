@@ -16,14 +16,51 @@ class SemanticMediaIndex(context: Context) {
     private val lock = Any()
 
     suspend fun put(item: MediaItem, embedding: FloatArray) = withContext(Dispatchers.IO) {
-        val bytes = ByteArray(embedding.size * 4)
-        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().put(embedding)
+        putBatch(listOf(item to embedding))
+    }
+
+    suspend fun putBatch(batch: List<Pair<MediaItem, FloatArray>>) = withContext(Dispatchers.IO) {
+        if (batch.isEmpty()) return@withContext
         synchronized(lock) {
-            db.writableDatabase.execSQL(
-                "INSERT OR REPLACE INTO vectors(id, uri, name, path, size, date_added, embedding) VALUES(?,?,?,?,?,?,?)",
-                arrayOf(item.id, item.uri.toString(), item.name, item.path, item.size, item.dateAdded, bytes)
-            )
+            val database = db.writableDatabase
+            database.beginTransaction()
+            try {
+                val stmt = database.compileStatement(
+                    "INSERT OR REPLACE INTO vectors(id, uri, name, path, size, date_added, embedding) VALUES(?,?,?,?,?,?,?)"
+                )
+                for ((item, embedding) in batch) {
+                    val bytes = ByteArray(embedding.size * 4)
+                    ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().put(embedding)
+                    stmt.clearBindings()
+                    stmt.bindLong(1, item.id)
+                    stmt.bindString(2, item.uri.toString())
+                    stmt.bindString(3, item.name)
+                    stmt.bindString(4, item.path)
+                    stmt.bindLong(5, item.size)
+                    stmt.bindLong(6, item.dateAdded)
+                    stmt.bindBlob(7, bytes)
+                    stmt.executeInsert()
+                }
+                database.setTransactionSuccessful()
+            } finally {
+                database.endTransaction()
+            }
         }
+    }
+
+    suspend fun getIndexedMetadataMap(): Map<Long, Pair<Long, Long>> = withContext(Dispatchers.IO) {
+        val map = mutableMapOf<Long, Pair<Long, Long>>()
+        synchronized(lock) {
+            db.readableDatabase.rawQuery("SELECT id, size, date_added FROM vectors", null).use { c ->
+                val idCol = c.getColumnIndexOrThrow("id")
+                val sizeCol = c.getColumnIndexOrThrow("size")
+                val dateCol = c.getColumnIndexOrThrow("date_added")
+                while (c.moveToNext()) {
+                    map[c.getLong(idCol)] = Pair(c.getLong(sizeCol), c.getLong(dateCol))
+                }
+            }
+        }
+        map
     }
 
     suspend fun isCurrent(item: MediaItem): Boolean = withContext(Dispatchers.IO) {

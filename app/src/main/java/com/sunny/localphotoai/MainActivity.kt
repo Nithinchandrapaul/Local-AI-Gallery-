@@ -15,13 +15,16 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -78,6 +81,13 @@ fun LocalPhotoAIApp() {
     var clusters by remember { mutableStateOf<List<MediaCluster>>(emptyList()) }
     var selectedCluster by remember { mutableStateOf<MediaCluster?>(null) }
 
+    // Live Real-Time Analysis & Indexing State
+    var liveCurrentItem by remember { mutableStateOf<MediaItem?>(null) }
+    var liveProgress by remember { mutableFloatStateOf(0f) }
+    var liveRecentItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var liveTitle by remember { mutableStateOf("") }
+    var stopRequested by remember { mutableStateOf(false) }
+
     DisposableEffect(Unit) { onDispose { embedder.close() } }
 
     LaunchedEffect(permission) {
@@ -99,32 +109,63 @@ fun LocalPhotoAIApp() {
                         TextButton(enabled = !busy && permission, onClick = {
                             scope.launch {
                                 busy = true
+                                stopRequested = false
+                                liveTitle = "Indexing AI Semantic Search"
+                                liveProgress = 0f
+                                liveRecentItems = emptyList()
                                 status = "Loading on-device AI..."
                                 val ok = embedder.initialize()
-                                if (!ok) status = "On-device AI could not be loaded: ${embedder.lastError ?: "model unavailable"}"
-                                else {
+                                if (!ok) {
+                                    status = "On-device AI could not be loaded: ${embedder.lastError ?: "model unavailable"}"
+                                    busy = false
+                                } else {
                                     val photos = items.filter { !it.isVideo }
                                     val currentIds = photos.map { it.id }.toSet()
                                     index.removeMissing(currentIds)
+
+                                    status = "Reading indexed cache..."
+                                    val metadataMap = index.getIndexedMetadataMap()
                                     var updated = 0
                                     var unchanged = 0
-                                    photos.forEachIndexed { i, item ->
-                                        if (index.isCurrent(item)) {
+                                    val batch = mutableListOf<Pair<MediaItem, FloatArray>>()
+                                    val total = photos.size
+
+                                    for (i in photos.indices) {
+                                        if (stopRequested) {
+                                            status = "Indexing paused: $i/$total scanned ($updated indexed). Ready to search!"
+                                            break
+                                        }
+                                        val item = photos[i]
+                                        val existing = metadataMap[item.id]
+                                        if (existing != null && existing.first == item.size && existing.second == item.dateAdded) {
                                             unchanged++
                                         } else {
+                                            liveCurrentItem = item
                                             val e = embedder.embedImage(item.uri)
                                             if (e != null) {
-                                                index.put(item, e)
+                                                batch += (item to e)
                                                 updated++
+                                                liveRecentItems = (listOf(item) + liveRecentItems).take(16)
                                             }
                                         }
-                                        if (i % 10 == 0 || i == photos.lastIndex) {
-                                            status = "Indexed ${i + 1}/${photos.size} • $updated updated • $unchanged unchanged"
+                                        liveProgress = (i + 1).toFloat() / total
+                                        status = "Indexed ${i + 1}/$total • $updated updated • $unchanged unchanged"
+
+                                        if (batch.size >= 10 || i == photos.lastIndex) {
+                                            index.putBatch(batch)
+                                            batch.clear()
                                         }
                                     }
-                                    status = "AI index ready: ${index.count()} photos • $updated updated"
+                                    if (batch.isNotEmpty()) {
+                                        index.putBatch(batch)
+                                        batch.clear()
+                                    }
+                                    if (!stopRequested) {
+                                        status = "AI index ready: ${index.count()} photos • $updated updated"
+                                    }
+                                    busy = false
+                                    liveCurrentItem = null
                                 }
-                                busy = false
                             }
                         }) { Text("Index AI") }
                     }
@@ -140,6 +181,18 @@ fun LocalPhotoAIApp() {
             }
         ) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+                if (busy && liveTitle.isNotBlank()) {
+                    RealTimeProgressCard(
+                        title = liveTitle,
+                        statusText = status,
+                        progress = liveProgress,
+                        currentItem = liveCurrentItem,
+                        recentItems = liveRecentItems,
+                        onStop = { stopRequested = true }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+
                 if (!permission) {
                     PermissionCard { permissionLauncher.launch(permissionsToRequest) }
                 } else if (tab == 0) {
@@ -196,10 +249,24 @@ fun LocalPhotoAIApp() {
                         onAnalyze = {
                             scope.launch {
                                 busy = true
-                                status = "Analyzing duplicates and cleanup categories..."
-                                report = analyzer.analyze(items)
-                                status = "Analysis complete"
+                                stopRequested = false
+                                liveTitle = "Analyzing Gallery Clutter & Quality"
+                                liveProgress = 0f
+                                liveRecentItems = emptyList()
+                                status = "Scanning photos and identifying duplicates..."
+                                report = analyzer.analyze(items) { current, total, item ->
+                                    if (!stopRequested) {
+                                        liveCurrentItem = item
+                                        liveProgress = current.toFloat() / total
+                                        status = "Scanning $current / $total: ${item.name}"
+                                        if (item.isBlurry || item.isBadExposure || item.sha256 != null || item.isWhatsApp) {
+                                            liveRecentItems = (listOf(item) + liveRecentItems).take(16)
+                                        }
+                                    }
+                                }
+                                status = "Analysis complete: ${report?.recommendedDeleteIds?.size ?: 0} duplicates and cleanup items flagged"
                                 busy = false
+                                liveCurrentItem = null
                             }
                         },
                         onDelete = { selected ->
@@ -891,6 +958,109 @@ private fun PhotoGrid(items: List<MediaItem>) {
                             style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                         )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RealTimeProgressCard(
+    title: String,
+    statusText: String,
+    progress: Float,
+    currentItem: MediaItem?,
+    recentItems: List<MediaItem>,
+    onStop: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                }
+                OutlinedButton(
+                    onClick = onStop,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Stop", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+
+            LinearProgressIndicator(
+                progress = { progress.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(statusText, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall)
+            }
+
+            if (currentItem != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    AsyncImage(
+                        model = currentItem.uri,
+                        contentDescription = "Current photo",
+                        modifier = Modifier.size(50.dp).clip(MaterialTheme.shapes.small),
+                        contentScale = ContentScale.Crop
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "Now analyzing: ${currentItem.name}",
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "${"%.1f".format(currentItem.sizeMb)} MB • ${if (currentItem.isVideo) "Video" else "${currentItem.width}x${currentItem.height}"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            if (recentItems.isNotEmpty()) {
+                Text("Recently Analyzed (Real-Time Feed):", style = MaterialTheme.typography.labelSmall)
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(recentItems, key = { it.id }) { item ->
+                        Box(modifier = Modifier.size(52.dp)) {
+                            AsyncImage(
+                                model = item.uri,
+                                contentDescription = item.name,
+                                modifier = Modifier.fillMaxSize().clip(MaterialTheme.shapes.extraSmall),
+                                contentScale = ContentScale.Crop
+                            )
+                            if (item.isBlurry || item.qualityScore < 50) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
+                                    shape = MaterialTheme.shapes.extraSmall,
+                                    modifier = Modifier.align(Alignment.BottomStart)
+                                ) {
+                                    Text("!", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 2.dp))
+                                }
+                            }
+                        }
                     }
                 }
             }

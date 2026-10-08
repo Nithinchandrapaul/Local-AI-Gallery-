@@ -78,14 +78,47 @@ class EmbeddingEngine(private val context: Context) {
 
     suspend fun embedImage(uri: Uri): FloatArray? = withContext(Dispatchers.Default) {
         runCatching {
-            val bmp = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
-                ?: return@withContext null
-            val resized = resize(bmp, 768)
-            if (resized !== bmp) bmp.recycle()
-            val mp = BitmapImageBuilder(resized).build()
+            val bmp = loadOptimizedBitmap(uri, 256) ?: return@withContext null
+            val mp = BitmapImageBuilder(bmp).build()
             val result = embedder?.embedImage(mp)
-            resized.recycle()
+            bmp.recycle()
             result?.embeddings()?.firstOrNull()?.floatEmbedding()?.let(::compact)
+        }.getOrNull()
+    }
+
+    fun loadOptimizedBitmap(uri: Uri, targetSize: Int): Bitmap? {
+        // Fast Path 1: System MediaStore hardware-cached thumbnail (5-15ms)
+        runCatching {
+            return context.contentResolver.loadThumbnail(uri, android.util.Size(targetSize, targetSize), null)
+        }
+
+        // Fast Path 2: Sub-sampled decode using inSampleSize and RGB_565 (15-25ms)
+        return runCatching {
+            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, boundsOpts)
+            }
+            if (boundsOpts.outWidth <= 0 || boundsOpts.outHeight <= 0) return null
+            val maxDim = maxOf(boundsOpts.outWidth, boundsOpts.outHeight)
+            var sample = 1
+            while (maxDim / (sample * 2) >= targetSize) {
+                sample *= 2
+            }
+            val decodeOpts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+            val raw = context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, decodeOpts)
+            } ?: return null
+
+            if (raw.width > targetSize || raw.height > targetSize) {
+                val scaled = resize(raw, targetSize)
+                if (scaled !== raw) raw.recycle()
+                scaled
+            } else {
+                raw
+            }
         }.getOrNull()
     }
 

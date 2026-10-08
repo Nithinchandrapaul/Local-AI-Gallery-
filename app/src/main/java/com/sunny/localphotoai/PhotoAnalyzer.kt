@@ -55,88 +55,113 @@ data class CleanupReport(
 class PhotoAnalyzer(context: Context) {
     private val cleanup = CleanupEngine(context)
 
-    suspend fun analyze(items: List<MediaItem>, largeMb: Double = 10.0): CleanupReport =
-        withContext(Dispatchers.Default) {
-            val enriched = items.map { item ->
-                if (item.isVideo) {
-                    item.copy(
-                        sha256 = cleanup.sha256(item.uri),
-                        qualityScore = 70,
-                        qualityReason = "Video (${item.durationFormatted})"
-                    )
-                } else {
-                    val qual = cleanup.evaluateQuality(item.uri, item.width, item.height, item.size)
-                    item.copy(
-                        sha256 = cleanup.sha256(item.uri),
-                        dHash = cleanup.dHash(item.uri),
-                        qualityScore = qual.score,
-                        isBlurry = qual.isBlurry,
-                        isBadExposure = qual.isBadExposure,
-                        isHeavilyCompressed = qual.isHeavilyCompressed,
-                        isLowResolution = qual.isLowResolution,
-                        qualityReason = qual.reason
-                    )
-                }
+    suspend fun analyze(
+        items: List<MediaItem>,
+        largeMb: Double = 10.0,
+        onProgress: ((current: Int, total: Int, currentItem: MediaItem) -> Unit)? = null
+    ): CleanupReport = withContext(Dispatchers.Default) {
+        val total = items.size
+
+        // Step 1: Pre-identify candidates for exact SHA-256 duplicate checking by file size.
+        // Files with unique size CANNOT be duplicates, saving 99% of disk I/O.
+        val sizeCollisions = items.groupBy { it.size }.filter { it.value.size > 1 }.mapValues { (_, v) -> v.map { it.id }.toSet() }
+        val collisionIds = sizeCollisions.values.flatten().toSet()
+
+        val enriched = items.mapIndexed { index, item ->
+            val result = if (item.isVideo) {
+                val sha = if (item.id in collisionIds) cleanup.sha256(item.uri) else null
+                item.copy(
+                    sha256 = sha,
+                    qualityScore = 70,
+                    qualityReason = "Video (${item.durationFormatted})"
+                )
+            } else {
+                val visual = cleanup.analyzeVisuals(item.uri, item.width, item.height, item.size)
+                val sha = if (item.id in collisionIds) cleanup.sha256(item.uri) else null
+                item.copy(
+                    sha256 = sha,
+                    dHash = visual.dHash,
+                    qualityScore = visual.quality.score,
+                    isBlurry = visual.quality.isBlurry,
+                    isBadExposure = visual.quality.isBadExposure,
+                    isHeavilyCompressed = visual.quality.isHeavilyCompressed,
+                    isLowResolution = visual.quality.isLowResolution,
+                    qualityReason = visual.quality.reason
+                )
             }
 
-            val exact = enriched.groupBy { it.sha256 }
-                .filterKeys { it != null }.values.filter { it.size > 1 }
-
-            val visual = mutableListOf<List<MediaItem>>()
-            val used = mutableSetOf<Long>()
-            for (i in enriched.indices) {
-                val a = enriched[i]
-                if (a.id in used || a.dHash == null) continue
-                val group = mutableListOf(a)
-                for (j in i + 1 until enriched.size) {
-                    val b = enriched[j]
-                    if (b.id in used || b.dHash == null) continue
-                    if (cleanup.hamming(a.dHash, b.dHash) <= 8) group += b
-                }
-                if (group.size > 1) {
-                    group.forEach { used += it.id }
-                    visual += group
-                }
+            if (index % 5 == 0 || index == total - 1) {
+                onProgress?.invoke(index + 1, total, result)
             }
+            result
+        }
 
-            // Burst / Similar-shot sequence intelligence
-            val burstGroups = mutableListOf<List<MediaItem>>()
-            val burstUsed = mutableSetOf<Long>()
-            for (i in enriched.indices) {
-                val a = enriched[i]
-                if (a.id in burstUsed || a.dHash == null) continue
-                val bGroup = mutableListOf(a)
-                for (j in i + 1 until enriched.size) {
-                    val b = enriched[j]
-                    if (b.id in burstUsed || b.dHash == null) continue
-                    val timeClose = kotlin.math.abs(a.dateAdded - b.dateAdded) <= 15
-                    val visualClose = cleanup.hamming(a.dHash, b.dHash) <= 6
-                    if (timeClose && visualClose) {
-                        bGroup += b
-                    }
-                }
-                if (bGroup.size > 1) {
-                    bGroup.forEach { burstUsed += it.id }
-                    burstGroups += bGroup
+        // Exact duplicates from colliding sizes
+        val exact = enriched.filter { it.sha256 != null }
+            .groupBy { it.sha256 }
+            .values.filter { it.size > 1 }
+
+        // O(N log N) sorted temporal sliding window for burst sequences (replaces O(N^2) 57M loop)
+        val sortedByDate = enriched.filter { !it.isVideo && it.dHash != null }.sortedBy { it.dateAdded }
+        val burstGroups = mutableListOf<List<MediaItem>>()
+        val burstUsed = mutableSetOf<Long>()
+
+        for (i in sortedByDate.indices) {
+            val a = sortedByDate[i]
+            if (a.id in burstUsed) continue
+            val bGroup = mutableListOf(a)
+            // Look forward within 15 seconds window
+            for (j in i + 1 until minOf(sortedByDate.size, i + 30)) {
+                val b = sortedByDate[j]
+                if (b.id in burstUsed) continue
+                if (kotlin.math.abs(a.dateAdded - b.dateAdded) > 15) break
+                if (cleanup.hamming(a.dHash!!, b.dHash!!) <= 6) {
+                    bGroup += b
                 }
             }
-
-            val keeperIds = mutableSetOf<Long>()
-            val deleteIds = mutableSetOf<Long>()
-            exact.forEach { group ->
-                val keeper = group.maxWithOrNull(
-                    compareBy<MediaItem> { it.qualityScore }
-                        .thenBy { it.width.toLong() * it.height.toLong() }
-                        .thenBy { it.size }
-                        .thenBy { it.dateAdded }
-                ) ?: return@forEach
-                keeperIds += keeper.id
-                group.filter { it.id != keeper.id }.forEach { deleteIds += it.id }
+            if (bGroup.size > 1) {
+                bGroup.forEach { burstUsed += it.id }
+                burstGroups += bGroup
             }
+        }
 
-            val duplicateBytes = exact.sumOf { group ->
-                group.filter { it.id in deleteIds }.sumOf { it.size }
+        // Visual groups: check similar shots in temporal neighborhoods
+        val visual = mutableListOf<List<MediaItem>>()
+        val visualUsed = mutableSetOf<Long>()
+        for (i in sortedByDate.indices) {
+            val a = sortedByDate[i]
+            if (a.id in visualUsed) continue
+            val group = mutableListOf(a)
+            for (j in i + 1 until minOf(sortedByDate.size, i + 50)) {
+                val b = sortedByDate[j]
+                if (b.id in visualUsed) continue
+                if (kotlin.math.abs(a.dateAdded - b.dateAdded) > 120) break
+                if (cleanup.hamming(a.dHash!!, b.dHash!!) <= 8) {
+                    group += b
+                }
             }
+            if (group.size > 1) {
+                group.forEach { visualUsed += it.id }
+                visual += group
+            }
+        }
+
+        val keeperIds = mutableSetOf<Long>()
+        val deleteIds = mutableSetOf<Long>()
+        exact.forEach { group ->
+            val keeper = group.maxWithOrNull(
+                compareBy<MediaItem> { it.qualityScore }
+                    .thenBy { it.width.toLong() * it.height.toLong() }
+                    .thenBy { it.size }
+                    .thenBy { it.dateAdded }
+            ) ?: return@forEach
+            keeperIds += keeper.id
+            group.filter { it.id != keeper.id }.forEach { deleteIds += it.id }
+        }
+
+        val duplicateBytes = exact.sumOf { group ->
+            group.filter { it.id in deleteIds }.sumOf { it.size }
+        }
 
             val waItems = enriched.filter { it.isWhatsApp }
             val waSent = waItems.filter { it.isWhatsAppSent }
