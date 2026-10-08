@@ -8,6 +8,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.retrieval.universalembedder.UniversalEmbedder
 import com.google.mediapipe.tasks.retrieval.universalembedder.UniversalEmbedderOptions
 import kotlinx.coroutines.Dispatchers
@@ -45,7 +46,7 @@ class EmbeddingEngine(private val context: Context) {
                 .setBaseOptions(
                     BaseOptions.builder()
                         .setModelAssetPath(MODEL_ASSET_PATH)
-                        .setDelegate(BaseOptions.Delegate.GPU)
+                        .setDelegate(Delegate.GPU)
                         .build()
                 )
                 .setL2Normalize(true)
@@ -64,7 +65,7 @@ class EmbeddingEngine(private val context: Context) {
                 .setBaseOptions(
                     BaseOptions.builder()
                         .setModelAssetPath(MODEL_ASSET_PATH)
-                        .setDelegate(BaseOptions.Delegate.CPU)
+                        .setDelegate(Delegate.CPU)
                         .build()
                 )
                 .setL2Normalize(true)
@@ -88,7 +89,7 @@ class EmbeddingEngine(private val context: Context) {
                         .setBaseOptions(
                             BaseOptions.builder()
                                 .setModelAssetFileDescriptor(pfd.fd)
-                                .setDelegate(BaseOptions.Delegate.CPU)
+                                .setDelegate(Delegate.CPU)
                                 .build()
                         )
                         .setL2Normalize(true)
