@@ -78,7 +78,7 @@ class EmbeddingEngine(private val context: Context) {
 
     suspend fun embedImage(uri: Uri): FloatArray? = withContext(Dispatchers.Default) {
         runCatching {
-            val bmp = loadOptimizedBitmap(uri, 256) ?: return@withContext null
+            val bmp = loadOptimizedBitmap(uri, 224) ?: return@withContext null
             val mp = BitmapImageBuilder(bmp).build()
             val result = embedder?.embedImage(mp)
             bmp.recycle()
@@ -86,13 +86,33 @@ class EmbeddingEngine(private val context: Context) {
         }.getOrNull()
     }
 
-    fun loadOptimizedBitmap(uri: Uri, targetSize: Int): Bitmap? {
-        // Fast Path 1: System MediaStore hardware-cached thumbnail (5-15ms)
-        runCatching {
-            return context.contentResolver.loadThumbnail(uri, android.util.Size(targetSize, targetSize), null)
+    fun loadOptimizedBitmap(uri: Uri, targetSize: Int = 224): Bitmap? {
+        // Fast Path 1: System MediaStore thumbnail (5-15ms)
+        // Must convert HARDWARE config to software ARGB_8888 for MediaPipe
+        val thumb = runCatching {
+            context.contentResolver.loadThumbnail(uri, android.util.Size(targetSize, targetSize), null)
+        }.getOrNull()
+
+        if (thumb != null) {
+            val softwareBmp = if (thumb.config == Bitmap.Config.HARDWARE) {
+                val copy = thumb.copy(Bitmap.Config.ARGB_8888, false)
+                thumb.recycle()
+                copy
+            } else {
+                thumb
+            }
+            if (softwareBmp != null) {
+                return if (softwareBmp.width > targetSize || softwareBmp.height > targetSize) {
+                    val scaled = resize(softwareBmp, targetSize)
+                    if (scaled !== softwareBmp) softwareBmp.recycle()
+                    scaled
+                } else {
+                    softwareBmp
+                }
+            }
         }
 
-        // Fast Path 2: Sub-sampled decode using inSampleSize and RGB_565 (15-25ms)
+        // Fast Path 2: Sub-sampled decode directly into software ARGB_8888 (15-25ms)
         return runCatching {
             val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             context.contentResolver.openInputStream(uri)?.use {
@@ -106,7 +126,7 @@ class EmbeddingEngine(private val context: Context) {
             }
             val decodeOpts = BitmapFactory.Options().apply {
                 inSampleSize = sample
-                inPreferredConfig = Bitmap.Config.RGB_565
+                inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             val raw = context.contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, decodeOpts)
