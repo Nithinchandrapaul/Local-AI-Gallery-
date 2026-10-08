@@ -151,23 +151,28 @@ class EmbeddingEngine(private val context: Context) {
     suspend fun embedImage(uri: Uri): FloatArray? = withContext(Dispatchers.Default) {
         runCatching {
             val bmp = loadOptimizedBitmap(uri, 224) ?: return@withContext null
+            if (bmp.isRecycled) return@withContext null
             val mp = BitmapImageBuilder(bmp).build()
             val result = embedder?.embedImage(mp)
-            bmp.recycle()
+            if (!bmp.isRecycled) {
+                bmp.recycle()
+            }
             result?.embeddings()?.firstOrNull()?.floatEmbedding()?.let(::compact)
         }.getOrNull()
     }
 
     suspend fun embedBitmap(bmp: Bitmap): FloatArray? = withContext(Dispatchers.Default) {
         runCatching {
+            if (bmp.isRecycled) return@withContext null
             val softwareBmp = if (bmp.config == Bitmap.Config.HARDWARE) {
                 bmp.copy(Bitmap.Config.ARGB_8888, false)
             } else {
                 bmp
             }
+            if (softwareBmp == null || softwareBmp.isRecycled) return@withContext null
             val mp = BitmapImageBuilder(softwareBmp).build()
             val result = embedder?.embedImage(mp)
-            if (softwareBmp !== bmp) {
+            if (softwareBmp !== bmp && !softwareBmp.isRecycled) {
                 softwareBmp.recycle()
             }
             result?.embeddings()?.firstOrNull()?.floatEmbedding()?.let(::compact)
@@ -227,7 +232,9 @@ class EmbeddingEngine(private val context: Context) {
                 converted
             } else {
                 raw
-            }
+            } ?: return null
+
+            if (softwareBmp.isRecycled) return null
 
             if (softwareBmp.width > targetSize || softwareBmp.height > targetSize) {
                 val scaled = resize(softwareBmp, targetSize)
