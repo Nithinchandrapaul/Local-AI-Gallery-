@@ -430,7 +430,7 @@ fun LocalPhotoAIApp() {
                                         color = MaterialTheme.colorScheme.onPrimaryContainer
                                     )
                                     Text(
-                                        if (embedder.isGpuAccelerated) "🚀 Hardware Engine: GPU Accelerated" else "⚙️ Engine: Multi-core CPU",
+                                        "⚡ Engine: Multi-Core Neural CPU (XNNPACK SIMD)",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                                     )

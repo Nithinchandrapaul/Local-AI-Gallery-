@@ -33,63 +33,10 @@ class EmbeddingEngine(private val context: Context) {
         if (embedder != null) return@withContext true
         lastError = null
 
-        // Explicitly attempt native library load if needed
-        runCatching {
-            System.loadLibrary("litertlm_jni")
-            Log.i(TAG, "Preloaded liblitertlm_jni.so successfully")
-        }.onFailure { t ->
-            Log.w(TAG, "Notice: System.loadLibrary('litertlm_jni'): ${t.message}")
-        }
-
-        // 1. Hardware-Accelerated GPU Delegate via Asset (Vulkan/OpenCL)
-        try {
-            val options = UniversalEmbedderOptions.builder()
-                .setBaseOptions(
-                    BaseOptions.builder()
-                        .setModelAssetPath(MODEL_ASSET_PATH)
-                        .setDelegate(Delegate.GPU)
-                        .build()
-                )
-                .setTextDelegate(Delegate.GPU)
-                .setVisionDelegate(Delegate.GPU)
-                .setL2Normalize(true)
-                .build()
-            embedder = UniversalEmbedder.createFromOptions(context, options)
-            isGpuAccelerated = true
-            Log.i(TAG, "🚀 UniversalEmbedder successfully initialized with GPU acceleration (Text+Vision) from asset: $MODEL_ASSET_PATH")
-            return@withContext true
-        } catch (eGpuAsset: Throwable) {
-            Log.w(TAG, "GPU asset initialization failed (${eGpuAsset.message}), attempting extracted file descriptor...")
-        }
-
-        // 2. Hardware-Accelerated GPU Delegate via Extracted File Descriptor (direct page-aligned mmap)
-        try {
-            val file = ModelDownloader.modelFile(context)
-            if (file.exists() && file.length() > 0) {
-                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
-                    val options = UniversalEmbedderOptions.builder()
-                        .setBaseOptions(
-                            BaseOptions.builder()
-                                .setModelAssetFileDescriptor(pfd.fd)
-                                .setDelegate(Delegate.GPU)
-                                .build()
-                        )
-                        .setTextDelegate(Delegate.GPU)
-                        .setVisionDelegate(Delegate.GPU)
-                        .setL2Normalize(true)
-                        .build()
-                    embedder = UniversalEmbedder.createFromOptions(context, options)
-                    isGpuAccelerated = true
-                    Log.i(TAG, "🚀 UniversalEmbedder successfully initialized with GPU acceleration from file descriptor: ${file.absolutePath}")
-                    lastError = null
-                    return@withContext true
-                }
-            }
-        } catch (eGpuFile: Throwable) {
-            Log.w(TAG, "GPU file descriptor initialization failed: ${eGpuFile.message}, attempting CPU fallback...")
-        }
-
-        // 3. Fallback: Multi-core CPU Delegate via Asset
+        // 1. High-Performance Multi-Core CPU Delegate via Asset (XNNPACK ARM NEON SIMD)
+        // Note: Delegate.GPU is strictly avoided because 440M LLM/embedding shader compilation
+        // triggers SIGSEGV crashes in Qualcomm Adreno OpenCL drivers (/vendor/lib64/libllvm-qgl.so).
+        // Multi-core CPU with XNNPACK provides rock-solid, crash-free performance across all Android devices.
         try {
             val options = UniversalEmbedderOptions.builder()
                 .setBaseOptions(
@@ -104,14 +51,14 @@ class EmbeddingEngine(private val context: Context) {
                 .build()
             embedder = UniversalEmbedder.createFromOptions(context, options)
             isGpuAccelerated = false
-            Log.i(TAG, "Loaded UniversalEmbedder with CPU from asset: $MODEL_ASSET_PATH")
+            Log.i(TAG, "🚀 UniversalEmbedder successfully initialized with Multi-core CPU (XNNPACK) from asset: $MODEL_ASSET_PATH")
             return@withContext true
         } catch (eCpuAsset: Throwable) {
-            Log.w(TAG, "Direct asset CPU load failed: ${eCpuAsset.message}")
+            Log.w(TAG, "Direct asset CPU load failed: ${eCpuAsset.message}, attempting file descriptor fallback...")
             lastError = eCpuAsset.message ?: eCpuAsset.javaClass.simpleName
         }
 
-        // 4. Fallback: CPU via extracted file descriptor
+        // 2. High-Performance Multi-Core CPU Delegate via Extracted File Descriptor (direct page-aligned mmap)
         try {
             val file = ModelDownloader.modelFile(context)
             if (file.exists() && file.length() > 0) {
@@ -129,7 +76,7 @@ class EmbeddingEngine(private val context: Context) {
                         .build()
                     embedder = UniversalEmbedder.createFromOptions(context, options)
                     isGpuAccelerated = false
-                    Log.i(TAG, "Loaded UniversalEmbedder with CPU from file descriptor: ${file.absolutePath}")
+                    Log.i(TAG, "🚀 UniversalEmbedder successfully initialized with Multi-core CPU from file descriptor: ${file.absolutePath}")
                     lastError = null
                     return@withContext true
                 }

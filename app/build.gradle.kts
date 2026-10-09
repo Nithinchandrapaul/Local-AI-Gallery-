@@ -12,8 +12,8 @@ android {
         applicationId = "com.sunny.localphotoai"
         minSdk = 31
         targetSdk = 36
-        versionCode = 22
-        versionName = "3.3.5"
+        versionCode = 23
+        versionName = "3.3.6"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
